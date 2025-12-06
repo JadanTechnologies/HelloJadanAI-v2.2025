@@ -1355,28 +1355,95 @@ const BuilderChatInterface = ({ config, onViewChange, settings, apiKey }: { conf
                <>
                   {activeTab === 'preview' && (
                      <div className="h-full flex flex-col">
-                        <div className="px-8 pt-6 pb-2">
+                        <div className="px-8 pt-6 pb-2 flex justify-between items-center">
                            <div className="bg-slate-900 inline-flex rounded-lg p-1 border border-slate-800">
                               <button onClick={() => setPreviewMode('blueprint')} className={`px-3 py-1.5 rounded-md text-xs font-medium ${previewMode === 'blueprint' ? 'bg-slate-800 text-white' : 'text-slate-400'}`}>Blueprint</button>
-                              <button onClick={() => setPreviewMode('app')} className={`px-3 py-1.5 rounded-md text-xs font-medium ${previewMode === 'app' ? 'bg-slate-800 text-white' : 'text-slate-400'}`}>Live App</button>
+                              <button onClick={() => setPreviewMode('app')} disabled={buildStep !== 'complete'} className={`px-3 py-1.5 rounded-md text-xs font-medium ${previewMode === 'app' ? 'bg-slate-800 text-white' : 'text-slate-400 disabled:opacity-30 disabled:cursor-not-allowed'}`}>Live App</button>
                            </div>
                         </div>
                         <div className="flex-1 overflow-auto p-8 pt-4">
                            {previewMode === 'blueprint' && (
-                              <div className="max-w-5xl mx-auto space-y-8">
-                                 <div><h1 className="text-2xl font-bold text-white">{spec.name}</h1><p className="text-slate-400">{spec.description}</p></div>
-                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    {spec.pages.map((p, i) => (
-                                       <div key={i} className="bg-[#151923] border border-slate-800 rounded-xl p-6 text-center">
-                                          <h3 className="text-lg font-medium text-slate-200">{p.name}</h3>
-                                          <p className="text-xs text-slate-500">{p.description}</p>
-                                       </div>
-                                    ))}
+                              <div className="max-w-5xl mx-auto space-y-8 pb-20">
+                                 {/* Header */}
+                                 <div className="text-center">
+                                    <h1 className="text-3xl font-bold text-white mb-2">{spec.name}</h1>
+                                    <p className="text-slate-400 max-w-2xl mx-auto">{spec.description}</p>
+                                    <div className="mt-4 flex flex-wrap justify-center gap-2">
+                                       {spec.stack.map(tech => (
+                                          <span key={tech} className="px-2 py-1 bg-slate-800 rounded text-xs text-slate-300 border border-slate-700">{tech}</span>
+                                       ))}
+                                    </div>
+                                 </div>
+
+                                 {/* Pages */}
+                                 <div>
+                                    <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2"><Layout className="w-5 h-5 text-purple-400"/> Pages & Screens</h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                       {spec.pages.map((p, i) => (
+                                          <div key={i} className="bg-[#151923] border border-slate-800 rounded-xl p-5 hover:border-slate-700 transition group relative">
+                                             <div className="flex justify-between items-start mb-2">
+                                                <h4 className="font-bold text-white">{p.name}</h4>
+                                             </div>
+                                             <p className="text-sm text-slate-400 mb-3">{p.description}</p>
+                                             <div className="flex flex-wrap gap-2">
+                                                {p.components.map((c, idx) => (
+                                                   <span key={idx} className="text-[10px] uppercase font-mono bg-purple-500/10 text-purple-400 px-2 py-0.5 rounded border border-purple-500/20">{c}</span>
+                                                ))}
+                                             </div>
+                                          </div>
+                                       ))}
+                                    </div>
+                                 </div>
+
+                                 {/* Database */}
+                                 <div>
+                                    <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2"><Database className="w-5 h-5 text-blue-400"/> Database Schema</h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                       {spec.database.map((d, i) => (
+                                          <div key={i} className="bg-[#151923] border border-slate-800 rounded-xl p-5">
+                                             <div className="font-bold text-blue-400 mb-3 flex items-center gap-2">
+                                                <div className="w-2 h-2 rounded-full bg-blue-500"></div> {d.model}
+                                             </div>
+                                             <ul className="space-y-1">
+                                                {d.fields.map((f, idx) => (
+                                                   <li key={idx} className="text-xs font-mono text-slate-300 border-b border-slate-800/50 last:border-0 py-1 flex justify-between">
+                                                      <span>{f.split(' ')[0]}</span>
+                                                      <span className="text-slate-500">{f.split(' ').slice(1).join(' ')}</span>
+                                                   </li>
+                                                ))}
+                                             </ul>
+                                          </div>
+                                       ))}
+                                    </div>
+                                 </div>
+
+                                 {/* API Routes */}
+                                 <div>
+                                    <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2"><Server className="w-5 h-5 text-green-400"/> API Routes</h3>
+                                    <div className="grid grid-cols-1 gap-2">
+                                       {spec.apiRoutes.map((api, i) => (
+                                          <div key={i} className="bg-[#151923] border border-slate-800 rounded-lg p-3 flex items-center justify-between">
+                                             <div className="flex items-center gap-4">
+                                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase w-14 text-center ${api.method === 'GET' ? 'bg-blue-500/20 text-blue-400' : api.method === 'POST' ? 'bg-green-500/20 text-green-400' : api.method === 'DELETE' ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400'}`}>{api.method}</span>
+                                                <code className="text-sm text-slate-200">{api.path}</code>
+                                             </div>
+                                             <span className="text-xs text-slate-500">{api.description}</span>
+                                          </div>
+                                       ))}
+                                    </div>
                                  </div>
                               </div>
                            )}
                            {previewMode === 'app' && <AppInteractivePreview spec={spec} settings={settings} platform={config.platform} />}
                         </div>
+                        
+                        {buildStep === 'review' && previewMode === 'blueprint' && (
+                             <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-20">
+                                 <button onClick={handleApproveAndBuild} className="bg-gradient-to-r from-green-500 to-emerald-600 text-white px-8 py-3 rounded-full font-bold shadow-lg shadow-green-900/40 hover:scale-105 transition flex items-center gap-3 border-4 border-[#0f1117] animate-pulse-slow">
+                                    <Check className="w-5 h-5" /> Generate Code & Launch
+                                 </button>
+                             </div>
+                        )}
                      </div>
                   )}
                   {activeTab === 'code' && (
