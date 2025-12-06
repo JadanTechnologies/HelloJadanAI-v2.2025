@@ -10,7 +10,8 @@ import {
   Edit2, X, Server, PlayCircle, Check, Copy, Plus, Trash2, Palette,
   Mail, Smartphone, Cloud, ExternalLink, Key, Laptop, Tablet,
   Wifi, Battery, Signal, Menu, ArrowLeft, Home, CheckSquare, Calendar,
-  FileText, LogOut, Book, Coins, Activity, GitBranch, GitCommit
+  FileText, LogOut, Book, Coins, Activity, GitBranch, GitCommit,
+  HelpCircle, Info, Phone, FileQuestion, Scale
 } from 'lucide-react';
 
 // --- TYPES ---
@@ -69,7 +70,7 @@ interface BuilderConfig {
 // --- MOCK DATA ---
 
 const MOCK_USERS: User[] = [
-  { id: '1', name: 'Admin User', email: 'admin@hellojadan.ai', role: 'super_admin', status: 'active', plan: 'enterprise', createdAt: '2023-01-01', tokenBalance: 1000000, tokenUsage: 45000 },
+  { id: '1', name: 'Super Admin', email: 'admin@hellojadan.ai', role: 'super_admin', status: 'active', plan: 'enterprise', createdAt: '2023-01-01', tokenBalance: 9999999, tokenUsage: 45000 },
   { id: '2', name: 'Alice Dev', email: 'alice@dev.co', role: 'user', status: 'active', plan: 'pro', createdAt: '2023-05-12', tokenBalance: 50000, tokenUsage: 12000 },
   { id: '3', name: 'Bob Corp', email: 'bob@corp.inc', role: 'user', status: 'suspended', plan: 'free', createdAt: '2023-06-20', tokenBalance: 0, tokenUsage: 5000 },
   { id: '4', name: 'Startup Steve', email: 'steve@ycombinator.mock', role: 'user', status: 'active', plan: 'pro', createdAt: '2023-08-15', tokenBalance: 75000, tokenUsage: 2500 },
@@ -84,7 +85,7 @@ const MOCK_TASKS: Task[] = [
 
 const INITIAL_PROVIDERS: ProviderConfig[] = [
   { id: 'p1', name: 'Gemini 2.5 Flash', type: 'llm', status: 'active', usage: 45, priority: 1, apiKey: 'AIzaSyCAXDDdWsW8EheoN8rpnnKBINA79MI8ENM' },
-  { id: 'p2', name: 'Anthropic Claude 3', type: 'llm', status: 'active', usage: 20, priority: 2 },
+  { id: 'p2', name: 'Gemini 3.0 Pro', type: 'llm', status: 'active', usage: 20, priority: 2 },
   { id: 'p3', name: 'OpenAI GPT-4o', type: 'llm', status: 'inactive', usage: 0, priority: 3 },
   { id: 'p4', name: 'Vercel', type: 'hosting', status: 'active', usage: 60, priority: 1 },
 ];
@@ -199,6 +200,7 @@ class AppGeneratorService {
   async updateAppSpec(currentSpec: GeneratedAppSpec, updateInstruction: string): Promise<GeneratedAppSpec> {
     const model = this.ai.models;
     
+    // Upgrade to Gemini 3 Pro for updates to ensure high fidelity understanding of requests
     const systemPrompt = `
       You are a Senior Product Architect iterating on an existing application specification.
       
@@ -218,7 +220,7 @@ class AppGeneratorService {
 
     try {
       const result = await model.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3-pro-preview',
         contents: `Update this spec: ${JSON.stringify(currentSpec)}`,
         config: {
             systemInstruction: systemPrompt,
@@ -384,7 +386,7 @@ const Header = ({ onViewChange, currentView, settings, user, onLogout }: { onVie
              <Coins className="w-3.5 h-3.5 text-yellow-500" />
              <span className="text-slate-200 text-xs font-mono">{user.tokenBalance.toLocaleString()}</span>
            </div>
-           <button onClick={() => onViewChange('admin-dash')} className="hover:text-white transition flex items-center gap-2">
+           <button onClick={() => user.role === 'super_admin' ? onViewChange('admin-dash') : onViewChange('home')} className="hover:text-white transition flex items-center gap-2">
              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-xs">
                 {user.name.charAt(0)}
              </div>
@@ -400,6 +402,22 @@ const Header = ({ onViewChange, currentView, settings, user, onLogout }: { onVie
       )}
     </div>
   </nav>
+);
+
+// --- MODALS FOR LANDING INFO ---
+
+const InfoModal = ({ title, onClose, children }: { title: string, onClose: () => void, children: React.ReactNode }) => (
+  <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col shadow-2xl animate-accordion-down">
+       <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900 sticky top-0">
+          <h2 className="text-2xl font-bold text-white">{title}</h2>
+          <button onClick={onClose} className="p-2 hover:bg-slate-800 rounded-full text-slate-400 hover:text-white"><X className="w-5 h-5" /></button>
+       </div>
+       <div className="p-8 overflow-y-auto text-slate-300 leading-relaxed space-y-4">
+          {children}
+       </div>
+    </div>
+  </div>
 );
 
 const DocsView = ({ settings }: { settings: AppSettings }) => (
@@ -452,15 +470,14 @@ const DocsView = ({ settings }: { settings: AppSettings }) => (
   </div>
 );
 
-const AuthView = ({ onLogin }: { onLogin: () => void }) => {
+const AuthView = ({ onLogin }: { onLogin: (email: string) => void }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // Mock Auth
-    onLogin();
+    onLogin(email);
   };
 
   return (
@@ -479,7 +496,7 @@ const AuthView = ({ onLogin }: { onLogin: () => void }) => {
             {isLogin ? "Welcome back" : "Create your account"}
           </h2>
           <p className="text-slate-400 text-center text-sm mb-8">
-            Enter your credentials to access the builder.
+            Enter your credentials. (Use <code className="text-purple-400">admin@hellojadan.ai</code> for Super Admin)
           </p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -1564,19 +1581,37 @@ const LandingView = ({ onStart, onUpdateSettings }: { onStart: (c: BuilderConfig
   const [prompt, setPrompt] = useState('');
   const [platform, setPlatform] = useState<'web' | 'mobile'>('web');
   const [framework, setFramework] = useState('Next.js');
+  const [showModal, setShowModal] = useState<string | null>(null);
 
   useEffect(() => {
     setFramework(platform === 'web' ? 'Next.js' : 'React Native');
   }, [platform]);
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col relative overflow-hidden">
+    <div className="min-h-screen bg-slate-950 flex flex-col relative overflow-hidden font-sans">
        {/* Ambient Background */}
        <div className="absolute top-0 left-0 w-full h-full bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 pointer-events-none"></div>
        <div className="absolute -top-40 -right-40 w-[600px] h-[600px] bg-purple-600/20 rounded-full blur-[120px]"></div>
        <div className="absolute -bottom-40 -left-40 w-[600px] h-[600px] bg-blue-600/20 rounded-full blur-[120px]"></div>
 
-       <div className="relative z-10 container mx-auto px-6 py-24 flex flex-col items-center justify-center flex-1 text-center">
+       {/* Navigation */}
+       <header className="relative z-20 px-6 py-6 flex justify-between items-center max-w-7xl mx-auto w-full">
+         <div className="flex items-center gap-2">
+            <Rocket className="w-6 h-6 text-purple-500" />
+            <span className="font-bold text-xl text-white">HelloJadanAI</span>
+         </div>
+         <nav className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-400">
+            <button onClick={() => setShowModal('about')} className="hover:text-white transition">About Us</button>
+            <button onClick={() => setShowModal('contact')} className="hover:text-white transition">Contact</button>
+            <button onClick={() => setShowModal('faq')} className="hover:text-white transition">FAQ</button>
+         </nav>
+         <div className="flex items-center gap-4">
+            <button onClick={() => onStart({ prompt: '', platform: 'web', framework: 'Next.js' })} className="text-slate-300 hover:text-white text-sm font-medium">Log In</button>
+            <button className="bg-white text-slate-900 px-4 py-2 rounded-full text-sm font-bold hover:bg-slate-200 transition">Get Started</button>
+         </div>
+       </header>
+
+       <div className="relative z-10 container mx-auto px-6 py-12 flex flex-col items-center justify-center flex-1 text-center">
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-slate-900/50 border border-slate-800 mb-8 backdrop-blur animate-fade-in-up">
              <Rocket className="w-4 h-4 text-purple-400" />
              <span className="text-sm text-slate-300 font-medium">Build apps at the speed of thought</span>
@@ -1646,8 +1681,91 @@ const LandingView = ({ onStart, onUpdateSettings }: { onStart: (c: BuilderConfig
              <div className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-green-500" /> 10x Faster Dev</div>
           </div>
        </div>
+
+       {/* Footer */}
+       <footer className="relative z-10 border-t border-slate-800 bg-slate-900/50 py-12 px-6">
+          <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6">
+             <div className="text-slate-500 text-sm">
+                © 2024 HelloJadanAI Inc. All rights reserved.
+             </div>
+             <div className="flex gap-6 text-sm text-slate-400">
+                <button onClick={() => setShowModal('privacy')} className="hover:text-white">Privacy Policy</button>
+                <button onClick={() => setShowModal('refund')} className="hover:text-white">Refund Policy</button>
+                <button onClick={() => setShowModal('terms')} className="hover:text-white">Terms of Service</button>
+             </div>
+          </div>
+       </footer>
+
+       {/* Modals */}
+       {showModal && (
+          <InfoModal title={showModal === 'about' ? 'About Us' : showModal === 'contact' ? 'Contact Support' : showModal === 'faq' ? 'Frequently Asked Questions' : showModal.replace(/^\w/, c => c.toUpperCase()) + ' Policy'} onClose={() => setShowModal(null)}>
+             {showModal === 'about' && (
+                <>
+                   <p>HelloJadanAI is an AI-native development platform designed to democratize software creation. Our mission is to allow anyone, regardless of technical skill, to bring their ideas to life instantly.</p>
+                   <p>Founded in 2024, we leverage the most advanced LLMs like Gemini Pro and Flash to automate the heavy lifting of coding, database design, and deployment.</p>
+                </>
+             )}
+             {showModal === 'contact' && (
+                <>
+                   <p>We'd love to hear from you. Reach out to our team for enterprise inquiries, support, or feedback.</p>
+                   <div className="flex items-center gap-3 mt-4 text-slate-300">
+                      <Mail className="w-5 h-5" /> support@hellojadan.ai
+                   </div>
+                   <div className="flex items-center gap-3 mt-2 text-slate-300">
+                      <Phone className="w-5 h-5" /> +1 (555) 123-4567
+                   </div>
+                   <div className="flex items-center gap-3 mt-2 text-slate-300">
+                      <Globe className="w-5 h-5" /> www.hellojadan.ai
+                   </div>
+                </>
+             )}
+             {showModal === 'faq' && (
+                <div className="space-y-4">
+                   <div>
+                      <h4 className="font-bold text-white mb-1">Is the code production ready?</h4>
+                      <p>Yes, we generate clean, modular TypeScript code that adheres to industry best practices. It allows for full manual customization.</p>
+                   </div>
+                   <div>
+                      <h4 className="font-bold text-white mb-1">Can I export my project?</h4>
+                      <p>Absolutely. You can download the full source code as a JSON/Zip archive or push it directly to GitHub.</p>
+                   </div>
+                   <div>
+                      <h4 className="font-bold text-white mb-1">Which AI models do you use?</h4>
+                      <p>We primarily use Google's Gemini 3 Pro for architecture planning and Gemini 2.5 Flash for rapid code generation.</p>
+                   </div>
+                </div>
+             )}
+             {(showModal === 'privacy' || showModal === 'refund' || showModal === 'terms') && (
+                <>
+                   <p className="opacity-70 text-xs uppercase tracking-wide mb-2">Last Updated: October 2024</p>
+                   <p>This is a standard placeholder for legal text. In a production environment, this would contain the full legal agreement.</p>
+                   <p>1. Data Collection: We collect only necessary data to improve our AI models.</p>
+                   <p>2. Refunds: We offer a 14-day money-back guarantee for all paid plans if usage is under 50k tokens.</p>
+                   <p>3. Rights: You own all code generated by the platform.</p>
+                </>
+             )}
+          </InfoModal>
+       )}
     </div>
   );
+};
+
+const TokenUsageCard = ({ user }: { user: User }) => {
+   const percentage = Math.min((user.tokenUsage / user.tokenBalance) * 100, 100);
+   return (
+      <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl relative overflow-hidden group">
+         <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition"><Zap className="w-16 h-16 text-yellow-500" /></div>
+         <h3 className="text-lg font-bold text-white mb-2">Token Usage</h3>
+         <div className="flex items-end gap-2 mb-4">
+            <span className="text-3xl font-bold text-white">{user.tokenUsage.toLocaleString()}</span>
+            <span className="text-sm text-slate-500 mb-1">/ {user.tokenBalance.toLocaleString()}</span>
+         </div>
+         <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+            <div className="h-full bg-yellow-500 transition-all duration-1000" style={{ width: `${percentage}%` }}></div>
+         </div>
+         <p className="text-xs text-slate-500 mt-3">Resets on {new Date().toLocaleDateString()}</p>
+      </div>
+   );
 };
 
 const App = () => {
@@ -1670,8 +1788,14 @@ const App = () => {
     }
   };
 
-  const handleLogin = () => {
-    setUser(MOCK_USERS[1]); // Login as Alice by default
+  const handleLogin = (email: string) => {
+    // Super Admin Mock Login
+    if (email.toLowerCase().includes('admin')) {
+       setUser(MOCK_USERS[0]); 
+    } else {
+       setUser(MOCK_USERS[1]);
+    }
+
     if (builderConfig.prompt) {
         setView('builder');
     } else {
@@ -1698,24 +1822,31 @@ const App = () => {
          <>
            <Header onViewChange={setView} currentView={view} settings={settings} user={user} onLogout={() => setUser(null)} />
            {view === 'docs' ? <DocsView settings={settings} /> : (
-               <div className="container mx-auto px-6 py-12 text-center">
-                  <h1 className="text-4xl font-bold text-white mb-4">Dashboard</h1>
-                  <p className="text-slate-400 mb-8">Welcome back, {user?.name}. Start a new project or manage existing ones.</p>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto">
-                      <div onClick={() => setView('landing')} className="bg-slate-900 border border-slate-800 p-8 rounded-2xl hover:border-purple-500/50 cursor-pointer transition group">
-                          <div className="w-12 h-12 bg-purple-500/10 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition"><Rocket className="w-6 h-6 text-purple-500" /></div>
+               <div className="container mx-auto px-6 py-12">
+                  <h1 className="text-4xl font-bold text-white mb-2 text-center">Dashboard</h1>
+                  <p className="text-slate-400 mb-12 text-center">Welcome back, {user?.name}. Start a new project or manage existing ones.</p>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6 max-w-6xl mx-auto">
+                      <div onClick={() => setView('landing')} className="md:col-span-1 bg-slate-900 border border-slate-800 p-8 rounded-2xl hover:border-purple-500/50 cursor-pointer transition group flex flex-col items-center text-center justify-center min-h-[240px]">
+                          <div className="w-16 h-16 bg-purple-500/10 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition"><Rocket className="w-8 h-8 text-purple-500" /></div>
                           <h3 className="text-xl font-bold text-white mb-2">New Project</h3>
                           <p className="text-sm text-slate-400">Launch a new app from a text prompt.</p>
                       </div>
-                      <div className="bg-slate-900 border border-slate-800 p-8 rounded-2xl hover:border-blue-500/50 cursor-pointer transition group">
+
+                      <div className="md:col-span-1 bg-slate-900 border border-slate-800 p-8 rounded-2xl hover:border-blue-500/50 cursor-pointer transition group flex flex-col items-center text-center justify-center">
                           <div className="w-12 h-12 bg-blue-500/10 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition"><Layout className="w-6 h-6 text-blue-500" /></div>
-                          <h3 className="text-xl font-bold text-white mb-2">Templates</h3>
-                          <p className="text-sm text-slate-400">Start from a pre-built template.</p>
+                          <h3 className="text-lg font-bold text-white mb-1">Templates</h3>
+                          <p className="text-xs text-slate-400">Start from a pre-built template.</p>
                       </div>
-                      <div className="bg-slate-900 border border-slate-800 p-8 rounded-2xl hover:border-green-500/50 cursor-pointer transition group">
+
+                      <div className="md:col-span-1 bg-slate-900 border border-slate-800 p-8 rounded-2xl hover:border-green-500/50 cursor-pointer transition group flex flex-col items-center text-center justify-center">
                           <div className="w-12 h-12 bg-green-500/10 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition"><Globe className="w-6 h-6 text-green-500" /></div>
-                          <h3 className="text-xl font-bold text-white mb-2">Deployments</h3>
-                          <p className="text-sm text-slate-400">Manage your active applications.</p>
+                          <h3 className="text-lg font-bold text-white mb-1">Deployments</h3>
+                          <p className="text-xs text-slate-400">Manage your active applications.</p>
+                      </div>
+                      
+                      <div className="md:col-span-1">
+                         {user && <TokenUsageCard user={user} />}
                       </div>
                   </div>
                </div>
