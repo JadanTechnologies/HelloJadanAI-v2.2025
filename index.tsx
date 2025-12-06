@@ -12,7 +12,7 @@ import {
   Wifi, Battery, Signal, Menu, ArrowLeft, Home, CheckSquare, Calendar,
   FileText, LogOut, Book, Coins, Activity, GitBranch, GitCommit,
   HelpCircle, Info, Phone, FileQuestion, Scale, QrCode, DollarSign,
-  TrendingUp, TrendingDown, Clock
+  TrendingUp, TrendingDown, Clock, CloudLightning
 } from 'lucide-react';
 
 // --- TYPES ---
@@ -103,8 +103,11 @@ const MOCK_SUBSCRIPTIONS: Subscription[] = [
 const INITIAL_PROVIDERS: ProviderConfig[] = [
   { id: 'p1', name: 'Gemini 2.5 Flash', type: 'llm', status: 'active', usage: 45, priority: 1, apiKey: 'AIzaSyCAXDDdWsW8EheoN8rpnnKBINA79MI8ENM' },
   { id: 'p2', name: 'Gemini 3.0 Pro', type: 'llm', status: 'active', usage: 20, priority: 2 },
-  { id: 'p3', name: 'OpenAI GPT-4o', type: 'llm', status: 'inactive', usage: 0, priority: 3 },
-  { id: 'p4', name: 'Vercel', type: 'hosting', status: 'active', usage: 60, priority: 1 },
+  { id: 'p3', name: 'Claude 3.5 Sonnet', type: 'llm', status: 'inactive', usage: 0, priority: 3 },
+  { id: 'p4', name: 'Grok Beta', type: 'llm', status: 'inactive', usage: 0, priority: 4 },
+  { id: 'p5', name: 'OpenAI GPT-4o', type: 'llm', status: 'inactive', usage: 0, priority: 5 },
+  { id: 'h1', name: 'Vercel', type: 'hosting', status: 'active', usage: 60, priority: 1 },
+  { id: 'h2', name: 'Netlify', type: 'hosting', status: 'active', usage: 15, priority: 2 },
 ];
 
 // --- AI SERVICE ---
@@ -145,6 +148,9 @@ class AppGeneratorService {
       You are a world-class ${role}. 
       Your goal is to accept a short app idea and generate a complete technical specification for a modern application.
       Context: ${context}
+      
+      CRITICAL: You must EXACTLY satisfy the user's specific requests in the prompt (e.g., specific colors, features, names, or number of pages).
+      If the user specifies "Create a dashboard with 5 screens", you MUST generate 5 screens.
       
       Return a JSON object with:
       1. 'name': A creative name for the app.
@@ -680,6 +686,8 @@ const AdminSidebar = ({ currentView, onViewChange, settings }: { currentView: st
   </div>
 );
 
+// ... (AdminDashboard, AdminUsers, AdminBilling, AdminTasks, AdminProviders, AdminSettingsView, MobileFrame, WebFrame, Content, AppInteractivePreview components remain unchanged) ...
+
 const AdminDashboard = () => (
   <div className="p-8">
     <h1 className="text-2xl font-bold text-white mb-6">Platform Overview</h1>
@@ -1043,6 +1051,7 @@ const AdminProviders = ({ providers, onUpdate }: { providers: ProviderConfig[], 
                        {p.name}
                        {p.status === 'inactive' && <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-500">Inactive</span>}
                     </h3>
+                    <div className="text-xs text-slate-500 capitalize">{p.type}</div>
                  </div>
               </div>
               <div className="flex items-center gap-4 w-full md:w-auto">
@@ -1110,8 +1119,7 @@ const AdminSettingsView = ({ settings, onUpdate }: { settings: AppSettings, onUp
    );
 };
 
-// ... (MobileFrame, WebFrame, Content, AppInteractivePreview, BuilderChatInterface, LandingView, TokenUsageCard remain unchanged) ...
-
+// ... (MobileFrame, WebFrame, Content, AppInteractivePreview components remain unchanged) ...
 const MobileFrame = ({ children, isHome, onBack, appUrl }: { children?: React.ReactNode, isHome?: boolean, onBack?: () => void, appUrl?: string }) => {
   const [showQR, setShowQR] = useState(false);
 
@@ -1191,7 +1199,7 @@ const WebFrame = ({ children, spec, settings, activeRoute, onNavigate }: { child
 const Content = ({ spec, settings, isMobile, activeRoute, onNavigate }: { spec: GeneratedAppSpec, settings: AppSettings, isMobile: boolean, activeRoute: string, onNavigate: (route: string) => void }) => {
      if (activeRoute === 'home') {
         return (
-           <div className={`h-full flex flex-col font-sans ${isMobile ? 'bg-white' : 'bg-slate-50'}`}>
+           <div className={`h-full flex flex-col font-sans ${isMobile ? 'bg-white' : 'bg-slate-5'}`}>
               {!isMobile && (
                   <header className={`px-6 py-4 bg-white/80 backdrop-blur-md border-b border-gray-100 flex justify-between items-center z-10 sticky top-0`}>
                      <div className={`font-bold text-xl tracking-tight text-slate-900 cursor-pointer`} onClick={() => onNavigate('home')}>{spec.name}</div>
@@ -1318,6 +1326,7 @@ const BuilderChatInterface = ({ config, onViewChange, settings, apiKey }: { conf
   const [supabaseInputs, setSupabaseInputs] = useState({ url: '', key: '' });
   
   const [gitMode, setGitMode] = useState<'new' | 'existing'>('new');
+  const [launchTarget, setLaunchTarget] = useState<'vercel' | 'netlify'>('vercel');
 
   const aiService = useRef(new AppGeneratorService(apiKey));
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -1344,10 +1353,10 @@ const BuilderChatInterface = ({ config, onViewChange, settings, apiKey }: { conf
       type: 'status-list',
       content: `I'm analyzing your request...`,
       items: [
-        { label: "Analyzing requirements", status: "running" },
+        { label: "Analyzing prompt & requirements", status: "running" },
         { label: "Drafting database schema", status: "pending" },
-        { label: "Designing UI components", status: "pending" },
-        { label: "Generating API routes", status: "pending" }
+        { label: "Planning UI screens/pages", status: "pending" },
+        { label: "Generating API specification", status: "pending" }
       ],
       timestamp: new Date()
     }]);
@@ -1371,7 +1380,22 @@ const BuilderChatInterface = ({ config, onViewChange, settings, apiKey }: { conf
       setSpec(generatedSpec);
       setIsGenerating(false);
       setBuildStep('review');
-      addMessage({ role: 'assistant', type: 'text', content: `I've drafted the plan for **${generatedSpec.name}**. Review it and click **Generate Code**. You can also chat with me to make changes.` });
+      
+      // Explicit breakdown message as requested
+      const pageNames = generatedSpec.pages.map(p => `**${p.name}**`).join(', ');
+      addMessage({ 
+          role: 'assistant', 
+          type: 'text', 
+          content: `I've analyzed your prompt for a **${cfg.platform}** app. 
+          
+**Plan Breakdown:**
+*   **Screens:** ${generatedSpec.pages.length} screens planned (${pageNames}).
+*   **Stack:** ${generatedSpec.stack.join(', ')}.
+*   **Core:** ${generatedSpec.description}
+
+Please review the full blueprint on the right.` 
+      });
+
     } catch (e) {
       console.error(e);
       setIsGenerating(false);
@@ -1414,8 +1438,9 @@ const BuilderChatInterface = ({ config, onViewChange, settings, apiKey }: { conf
   };
 
   const handleLaunch = () => {
-    const deployUrl = `https://${spec?.name.toLowerCase().replace(/\s+/g, '-')}.vercel.app`;
-    addMessage({ role: 'assistant', type: 'text', content: `🚀 **Deployed!** [${deployUrl}](${deployUrl})` });
+    const domain = launchTarget === 'vercel' ? 'vercel.app' : 'netlify.app';
+    const deployUrl = `https://${spec?.name.toLowerCase().replace(/\s+/g, '-')}.${domain}`;
+    addMessage({ role: 'assistant', type: 'text', content: `🚀 **Deployed to ${launchTarget === 'vercel' ? 'Vercel' : 'Netlify'}!** [${deployUrl}](${deployUrl})` });
     window.open(deployUrl, '_blank');
   };
 
@@ -1545,6 +1570,12 @@ const BuilderChatInterface = ({ config, onViewChange, settings, apiKey }: { conf
             </div>
             <div className="flex items-center gap-3">
                {activeTab === 'code' && <button onClick={handleDownloadCode} className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md bg-slate-800 text-slate-300 hover:text-white"><Download className="w-3.5 h-3.5" /> Download</button>}
+               
+               <div className="flex bg-slate-800 rounded-md p-0.5 border border-slate-700/50">
+                  <button onClick={() => setLaunchTarget('vercel')} className={`px-2 py-1 rounded text-[10px] font-bold ${launchTarget === 'vercel' ? 'bg-black text-white' : 'text-slate-400'}`}>Vercel</button>
+                  <button onClick={() => setLaunchTarget('netlify')} className={`px-2 py-1 rounded text-[10px] font-bold ${launchTarget === 'netlify' ? 'bg-teal-900 text-teal-100' : 'text-slate-400'}`}>Netlify</button>
+               </div>
+               
                <button onClick={handleLaunch} disabled={buildStep !== 'complete'} className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md bg-white text-slate-900 hover:bg-slate-200 disabled:opacity-50"><Rocket className="w-3.5 h-3.5" /> Launch</button>
             </div>
          </div>
@@ -1761,318 +1792,3 @@ const BuilderChatInterface = ({ config, onViewChange, settings, apiKey }: { conf
     </div>
   );
 };
-
-// --- APP ROOT ---
-
-const LandingView = ({ onStart, onUpdateSettings }: { onStart: (c: BuilderConfig) => void, onUpdateSettings: (name: string) => void }) => {
-  const [prompt, setPrompt] = useState('');
-  const [platform, setPlatform] = useState<'web' | 'mobile'>('web');
-  const [framework, setFramework] = useState('Next.js');
-  const [showModal, setShowModal] = useState<string | null>(null);
-
-  useEffect(() => {
-    setFramework(platform === 'web' ? 'Next.js' : 'React Native');
-  }, [platform]);
-
-  return (
-    <div className="min-h-screen bg-slate-950 flex flex-col relative overflow-hidden font-sans">
-       {/* Ambient Background */}
-       <div className="absolute top-0 left-0 w-full h-full bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 pointer-events-none"></div>
-       <div className="absolute -top-40 -right-40 w-[600px] h-[600px] bg-purple-600/20 rounded-full blur-[120px]"></div>
-       <div className="absolute -bottom-40 -left-40 w-[600px] h-[600px] bg-blue-600/20 rounded-full blur-[120px]"></div>
-
-       {/* Navigation */}
-       <header className="relative z-20 px-6 py-6 flex justify-between items-center max-w-7xl mx-auto w-full">
-         <div className="flex items-center gap-2">
-            <Rocket className="w-6 h-6 text-purple-500" />
-            <span className="font-bold text-xl text-white">HelloJadanAI</span>
-         </div>
-         <nav className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-400">
-            <button onClick={() => setShowModal('about')} className="hover:text-white transition">About Us</button>
-            <button onClick={() => setShowModal('contact')} className="hover:text-white transition">Contact</button>
-            <button onClick={() => setShowModal('faq')} className="hover:text-white transition">FAQ</button>
-         </nav>
-         <div className="flex items-center gap-4">
-            <button onClick={() => onStart({ prompt: '', platform: 'web', framework: 'Next.js' })} className="text-slate-300 hover:text-white text-sm font-medium">Log In</button>
-            <button className="bg-white text-slate-900 px-4 py-2 rounded-full text-sm font-bold hover:bg-slate-200 transition">Get Started</button>
-         </div>
-       </header>
-
-       <div className="relative z-10 container mx-auto px-6 py-12 flex flex-col items-center justify-center flex-1 text-center">
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-slate-900/50 border border-slate-800 mb-8 backdrop-blur animate-fade-in-up">
-             <Rocket className="w-4 h-4 text-purple-400" />
-             <span className="text-sm text-slate-300 font-medium">Build apps at the speed of thought</span>
-          </div>
-          
-          <h1 className="text-6xl md:text-7xl font-extrabold text-white tracking-tight mb-6 max-w-4xl leading-tight">
-             Idea to Production <br/>
-             <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-blue-500">in One Prompt.</span>
-          </h1>
-          
-          <p className="text-xl text-slate-400 max-w-2xl mb-12 leading-relaxed">
-             Generate full-stack web and mobile applications with a single sentence. 
-             Backend, Database, UI, and Deployment included.
-          </p>
-
-          <div className="w-full max-w-2xl bg-slate-900/60 backdrop-blur-xl border border-slate-700/50 p-2 rounded-2xl shadow-2xl transition-all hover:border-slate-600/80 group">
-             <div className="relative flex items-center">
-                <div className="absolute left-4 text-slate-500"><Terminal className="w-5 h-5" /></div>
-                <input 
-                  type="text" 
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  placeholder="Describe your app... (e.g. A marketplace for vintage watches)"
-                  className="w-full bg-transparent border-none text-white text-lg py-4 pl-12 pr-4 focus:ring-0 placeholder:text-slate-600 outline-none h-16"
-                  onKeyDown={(e) => { if (e.key === 'Enter' && prompt) onStart({ prompt, platform, framework }); }}
-                />
-                <button 
-                  onClick={() => prompt && onStart({ prompt, platform, framework })}
-                  className="absolute right-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:opacity-90 text-white px-6 py-2.5 rounded-xl font-bold transition shadow-lg shadow-purple-900/20 flex items-center gap-2"
-                >
-                   Build <ChevronRight className="w-4 h-4" />
-                </button>
-             </div>
-             
-             <div className="border-t border-slate-800 mt-2 pt-3 px-4 pb-1 flex items-center gap-6 text-sm">
-                <div className="flex items-center gap-2">
-                   <span className="text-slate-500">Platform:</span>
-                   <div className="flex bg-slate-800 rounded-lg p-1">
-                      <button onClick={() => setPlatform('web')} className={`px-3 py-1 rounded-md transition ${platform === 'web' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}>Web</button>
-                      <button onClick={() => setPlatform('mobile')} className={`px-3 py-1 rounded-md transition ${platform === 'mobile' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}>Mobile</button>
-                   </div>
-                </div>
-                <div className="flex items-center gap-2">
-                   <span className="text-slate-500">Stack:</span>
-                   <select value={framework} onChange={(e) => setFramework(e.target.value)} className="bg-slate-800 text-slate-300 border-none rounded-md py-1 px-3 outline-none cursor-pointer">
-                      {platform === 'web' ? (
-                          <>
-                             <option>Next.js</option>
-                             <option>Remix</option>
-                             <option>Vue/Nuxt</option>
-                          </>
-                      ) : (
-                          <>
-                             <option>React Native</option>
-                             <option>Flutter</option>
-                             <option>SwiftUI</option>
-                          </>
-                      )}
-                   </select>
-                </div>
-             </div>
-          </div>
-          
-          <div className="mt-12 flex gap-8 text-sm font-medium text-slate-500">
-             <div className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-green-500" /> Free Tier Available</div>
-             <div className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-green-500" /> No Credit Card Required</div>
-             <div className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-green-500" /> 10x Faster Dev</div>
-          </div>
-       </div>
-
-       {/* Footer */}
-       <footer className="relative z-10 border-t border-slate-800 bg-slate-900/50 py-12 px-6">
-          <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6">
-             <div className="text-slate-500 text-sm">
-                © 2024 HelloJadanAI Inc. All rights reserved.
-             </div>
-             <div className="flex gap-6 text-sm text-slate-400">
-                <button onClick={() => setShowModal('privacy')} className="hover:text-white">Privacy Policy</button>
-                <button onClick={() => setShowModal('refund')} className="hover:text-white">Refund Policy</button>
-                <button onClick={() => setShowModal('terms')} className="hover:text-white">Terms of Service</button>
-             </div>
-          </div>
-       </footer>
-
-       {/* Modals */}
-       {showModal && (
-          <InfoModal title={showModal === 'about' ? 'About Us' : showModal === 'contact' ? 'Contact Support' : showModal === 'faq' ? 'Frequently Asked Questions' : showModal.replace(/^\w/, c => c.toUpperCase()) + ' Policy'} onClose={() => setShowModal(null)}>
-             {showModal === 'about' && (
-                <>
-                   <p>HelloJadanAI is an AI-native development platform designed to democratize software creation. Our mission is to allow anyone, regardless of technical skill, to bring their ideas to life instantly.</p>
-                   <p>Founded in 2024, we leverage the most advanced LLMs like Gemini Pro and Flash to automate the heavy lifting of coding, database design, and deployment.</p>
-                </>
-             )}
-             {showModal === 'contact' && (
-                <>
-                   <p>We'd love to hear from you. Reach out to our team for enterprise inquiries, support, or feedback.</p>
-                   <div className="flex items-center gap-3 mt-4 text-slate-300">
-                      <Mail className="w-5 h-5" /> support@hellojadan.ai
-                   </div>
-                   <div className="flex items-center gap-3 mt-2 text-slate-300">
-                      <Phone className="w-5 h-5" /> +1 (555) 123-4567
-                   </div>
-                   <div className="flex items-center gap-3 mt-2 text-slate-300">
-                      <Globe className="w-5 h-5" /> www.hellojadan.ai
-                   </div>
-                </>
-             )}
-             {showModal === 'faq' && (
-                <div className="space-y-4">
-                   <div>
-                      <h4 className="font-bold text-white mb-1">Is the code production ready?</h4>
-                      <p>Yes, we generate clean, modular TypeScript code that adheres to industry best practices. It allows for full manual customization.</p>
-                   </div>
-                   <div>
-                      <h4 className="font-bold text-white mb-1">Can I export my project?</h4>
-                      <p>Absolutely. You can download the full source code as a JSON/Zip archive or push it directly to GitHub.</p>
-                   </div>
-                   <div>
-                      <h4 className="font-bold text-white mb-1">Which AI models do you use?</h4>
-                      <p>We primarily use Google's Gemini 3 Pro for architecture planning and Gemini 2.5 Flash for rapid code generation.</p>
-                   </div>
-                </div>
-             )}
-             {(showModal === 'privacy' || showModal === 'refund' || showModal === 'terms') && (
-                <>
-                   <p className="opacity-70 text-xs uppercase tracking-wide mb-2">Last Updated: October 2024</p>
-                   <p>This is a standard placeholder for legal text. In a production environment, this would contain the full legal agreement.</p>
-                   <p>1. Data Collection: We collect only necessary data to improve our AI models.</p>
-                   <p>2. Refunds: We offer a 14-day money-back guarantee for all paid plans if usage is under 50k tokens.</p>
-                   <p>3. Rights: You own all code generated by the platform.</p>
-                </>
-             )}
-          </InfoModal>
-       )}
-    </div>
-  );
-};
-
-const TokenUsageCard = ({ user }: { user: User }) => {
-   const percentage = Math.min((user.tokenUsage / user.tokenBalance) * 100, 100);
-   return (
-      <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl relative overflow-hidden group">
-         <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition"><Zap className="w-16 h-16 text-yellow-500" /></div>
-         <h3 className="text-lg font-bold text-white mb-2">Token Usage</h3>
-         <div className="flex items-end gap-2 mb-4">
-            <span className="text-3xl font-bold text-white">{user.tokenUsage.toLocaleString()}</span>
-            <span className="text-sm text-slate-500 mb-1">/ {user.tokenBalance.toLocaleString()}</span>
-         </div>
-         <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-            <div className="h-full bg-yellow-500 transition-all duration-1000" style={{ width: `${percentage}%` }}></div>
-         </div>
-         <p className="text-xs text-slate-500 mt-3">Resets on {new Date().toLocaleDateString()}</p>
-      </div>
-   );
-};
-
-const App = () => {
-  const [view, setView] = useState('landing');
-  const [user, setUser] = useState<User | null>(null);
-  const [builderConfig, setBuilderConfig] = useState<BuilderConfig>({ prompt: '', platform: 'web', framework: 'Next.js' });
-  const [settings, setSettings] = useState<AppSettings>({ appName: 'HelloJadanAI', primaryColor: '#7c3aed' });
-  const [providers, setProviders] = useState<ProviderConfig[]>(INITIAL_PROVIDERS);
-
-  // Get active Gemini key from providers or fallback
-  const geminiKey = providers.find(p => p.id === 'p1')?.apiKey || '';
-
-  const handleStartBuilder = (config: BuilderConfig) => {
-    if (!user) {
-        setBuilderConfig(config);
-        setView('auth');
-    } else {
-        setBuilderConfig(config);
-        setView('builder');
-    }
-  };
-
-  const handleLogin = (email: string) => {
-    let loggedInUser;
-    // Super Admin Mock Login
-    if (email.toLowerCase().includes('admin')) {
-       loggedInUser = MOCK_USERS[0];
-    } else {
-       loggedInUser = MOCK_USERS[1];
-    }
-    setUser(loggedInUser);
-
-    if (builderConfig.prompt) {
-        setView('builder');
-    } else {
-        // Redirect to admin dash if super admin, else user home
-        if (loggedInUser.role === 'super_admin') {
-            setView('admin-dash');
-        } else {
-            setView('home');
-        }
-    }
-  };
-
-  return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-purple-500/30">
-      {view === 'landing' && <LandingView onStart={handleStartBuilder} onUpdateSettings={(name) => setSettings({...settings, appName: name})} />}
-      
-      {view === 'auth' && <AuthView onLogin={handleLogin} />}
-
-      {view === 'builder' && (
-         <BuilderChatInterface 
-            config={builderConfig} 
-            onViewChange={setView} 
-            settings={settings} 
-            apiKey={geminiKey}
-         />
-      )}
-
-      {(view === 'home' || view === 'templates' || view === 'docs') && (
-         <>
-           <Header onViewChange={setView} currentView={view} settings={settings} user={user} onLogout={() => setUser(null)} />
-           {view === 'docs' ? <DocsView settings={settings} /> : (
-               <div className="container mx-auto px-6 py-12">
-                  <h1 className="text-4xl font-bold text-white mb-2 text-center">Dashboard</h1>
-                  <p className="text-slate-400 mb-12 text-center">Welcome back, {user?.name}. Start a new project or manage existing ones.</p>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6 max-w-6xl mx-auto">
-                      <div onClick={() => setView('landing')} className="md:col-span-1 bg-slate-900 border border-slate-800 p-8 rounded-2xl hover:border-purple-500/50 cursor-pointer transition group flex flex-col items-center text-center justify-center min-h-[240px]">
-                          <div className="w-16 h-16 bg-purple-500/10 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition"><Rocket className="w-8 h-8 text-purple-500" /></div>
-                          <h3 className="text-xl font-bold text-white mb-2">New Project</h3>
-                          <p className="text-sm text-slate-400">Launch a new app from a text prompt.</p>
-                      </div>
-
-                      <div className="md:col-span-1 bg-slate-900 border border-slate-800 p-8 rounded-2xl hover:border-blue-500/50 cursor-pointer transition group flex flex-col items-center text-center justify-center">
-                          <div className="w-12 h-12 bg-blue-500/10 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition"><Layout className="w-6 h-6 text-blue-500" /></div>
-                          <h3 className="text-lg font-bold text-white mb-1">Templates</h3>
-                          <p className="text-xs text-slate-400">Start from a pre-built template.</p>
-                      </div>
-
-                      <div className="md:col-span-1 bg-slate-900 border border-slate-800 p-8 rounded-2xl hover:border-green-500/50 cursor-pointer transition group flex flex-col items-center text-center justify-center">
-                          <div className="w-12 h-12 bg-green-500/10 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition"><Globe className="w-6 h-6 text-green-500" /></div>
-                          <h3 className="text-lg font-bold text-white mb-1">Deployments</h3>
-                          <p className="text-xs text-slate-400">Manage your active applications.</p>
-                      </div>
-                      
-                      <div className="md:col-span-1">
-                         {user && <TokenUsageCard user={user} />}
-                      </div>
-                  </div>
-               </div>
-           )}
-         </>
-      )}
-
-      {view.startsWith('admin') && (
-        <div className="flex min-h-screen">
-          <AdminSidebar currentView={view} onViewChange={setView} settings={settings} />
-          <div className="flex-1 bg-slate-950 overflow-y-auto">
-             {view === 'admin-dash' && <AdminDashboard />}
-             {view === 'admin-users' && <AdminUsers />}
-             {view === 'admin-tasks' && <AdminTasks />}
-             {view === 'admin-ai' && <AdminProviders providers={providers} onUpdate={setProviders} />}
-             {view === 'admin-settings' && <AdminSettingsView settings={settings} onUpdate={setSettings} />}
-             {view === 'admin-billing' && <AdminBilling />}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-const rootElement = document.getElementById('root');
-if (!rootElement) {
-  throw new Error("Could not find root element to mount to");
-}
-
-const root = createRoot(rootElement);
-root.render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);
