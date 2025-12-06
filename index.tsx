@@ -11,7 +11,7 @@ import {
   Mail, Smartphone, Cloud, ExternalLink, Key, Laptop, Tablet,
   Wifi, Battery, Signal, Menu, ArrowLeft, Home, CheckSquare, Calendar,
   FileText, LogOut, Book, Coins, Activity, GitBranch, GitCommit,
-  HelpCircle, Info, Phone, FileQuestion, Scale
+  HelpCircle, Info, Phone, FileQuestion, Scale, QrCode
 } from 'lucide-react';
 
 // --- TYPES ---
@@ -964,13 +964,27 @@ const AdminSettingsView = ({ settings, onUpdate }: { settings: AppSettings, onUp
 
 // --- BUILDER COMPONENTS ---
 
-const MobileFrame = ({ children, isHome, onBack }: { children?: React.ReactNode, isHome?: boolean, onBack?: () => void }) => (
+const MobileFrame = ({ children, isHome, onBack, appUrl }: { children?: React.ReactNode, isHome?: boolean, onBack?: () => void, appUrl?: string }) => {
+  const [showQR, setShowQR] = useState(false);
+
+  return (
     <div className="relative mx-auto w-full max-w-[350px] h-full max-h-[800px] aspect-[9/19] bg-black rounded-[3rem] border-[8px] border-slate-900 shadow-2xl overflow-hidden ring-1 ring-slate-800/50">
       <div className="absolute top-0 left-1/2 -translate-x-1/2 h-7 w-32 bg-slate-900 rounded-b-2xl z-30"></div>
       <div className="w-full h-full bg-white rounded-[2.5rem] overflow-hidden flex flex-col relative z-0">
          <div className="h-10 w-full bg-white/90 backdrop-blur z-20 flex items-center justify-between px-6 pt-2 text-[10px] font-bold text-black border-b border-transparent">
             <span>9:41</span>
-            <div className="flex gap-1"><Signal className="w-3 h-3" /><Wifi className="w-3 h-3" /><Battery className="w-3 h-3" /></div>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => setShowQR(!showQR)}
+                className="p-1 hover:bg-gray-100 rounded"
+                title="Scan to Preview"
+              >
+                <QrCode className="w-3 h-3" />
+              </button>
+              <Signal className="w-3 h-3" />
+              <Wifi className="w-3 h-3" />
+              <Battery className="w-3 h-3" />
+            </div>
          </div>
          <div className="flex-1 relative overflow-hidden flex flex-col bg-white">
              {!isHome && onBack && (
@@ -981,13 +995,34 @@ const MobileFrame = ({ children, isHome, onBack }: { children?: React.ReactNode,
                 </div>
              )}
              {children}
+             
+             {showQR && (
+               <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center animate-fade-in">
+                 <div className="bg-white p-4 rounded-xl shadow-2xl mb-4">
+                    <img 
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(appUrl || 'https://hellojadan.ai')}`}
+                      alt="Preview QR Code"
+                      className="w-32 h-32"
+                    />
+                 </div>
+                 <h3 className="text-white font-bold text-lg mb-2">Scan to Preview</h3>
+                 <p className="text-slate-400 text-xs">Use your phone's camera or Expo Go to preview this app instantly.</p>
+                 <button 
+                   onClick={() => setShowQR(false)}
+                   className="mt-6 text-slate-400 hover:text-white text-sm"
+                 >
+                   Close
+                 </button>
+               </div>
+             )}
          </div>
          <div className="h-5 w-full bg-white z-20 flex justify-center items-center pb-2">
             <div className="w-32 h-1 bg-slate-900 rounded-full opacity-20"></div>
          </div>
       </div>
     </div>
-);
+  );
+};
 
 const WebFrame = ({ children, spec, settings, activeRoute, onNavigate }: { children?: React.ReactNode, spec: GeneratedAppSpec, settings: AppSettings, activeRoute: string, onNavigate: (r: string) => void }) => (
      <div className="w-full h-full bg-white rounded-lg border border-slate-800 shadow-2xl overflow-hidden flex flex-col text-slate-900">
@@ -1090,7 +1125,11 @@ const AppInteractivePreview = ({ spec, settings, platform }: { spec: GeneratedAp
 
   return isMobile ? (
      <div className="flex items-center justify-center h-full py-4 bg-transparent">
-       <MobileFrame isHome={activeRoute === 'home'} onBack={() => setActiveRoute('home')}>
+       <MobileFrame 
+         isHome={activeRoute === 'home'} 
+         onBack={() => setActiveRoute('home')}
+         appUrl={`https://${spec.name.toLowerCase().replace(/\s+/g, '-')}.expo.dev`}
+       >
           <Content spec={spec} settings={settings} isMobile={isMobile} activeRoute={activeRoute} onNavigate={setActiveRoute} />
        </MobileFrame>
      </div>
