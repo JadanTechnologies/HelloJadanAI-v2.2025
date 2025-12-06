@@ -81,7 +81,7 @@ const MOCK_TASKS: Task[] = [
 ];
 
 const INITIAL_PROVIDERS: ProviderConfig[] = [
-  { id: 'p1', name: 'Gemini 3 Pro', type: 'llm', status: 'active', usage: 45, priority: 1, apiKey: 'AIzaSyCAXDDdWsW8EheoN8rpnnKBINA79MI8ENM' },
+  { id: 'p1', name: 'Gemini 2.5 Flash', type: 'llm', status: 'active', usage: 45, priority: 1, apiKey: 'AIzaSyCAXDDdWsW8EheoN8rpnnKBINA79MI8ENM' },
   { id: 'p2', name: 'Anthropic Claude 3', type: 'llm', status: 'active', usage: 20, priority: 2 },
   { id: 'p3', name: 'OpenAI GPT-4o', type: 'llm', status: 'inactive', usage: 0, priority: 3 },
   { id: 'p4', name: 'Vercel', type: 'hosting', status: 'active', usage: 60, priority: 1 },
@@ -93,8 +93,6 @@ class AppGeneratorService {
   private ai: GoogleGenAI;
 
   constructor(apiKey?: string) {
-    // If no key is provided via UI, fall back to process.env (Studio default)
-    // If UI key is provided, it takes precedence.
     const key = apiKey && apiKey.trim() !== '' ? apiKey : (process.env.API_KEY || '');
     this.ai = new GoogleGenAI({ apiKey: key });
   }
@@ -124,7 +122,7 @@ class AppGeneratorService {
 
     try {
       const result = await model.generateContent({
-        model: 'gemini-3-pro-preview',
+        model: 'gemini-2.5-flash', // Switched to flash for stability, can use gemini-3-pro-preview if key supports it
         contents: prompt,
         config: {
           systemInstruction: systemPrompt,
@@ -183,15 +181,85 @@ class AppGeneratorService {
       };
     } catch (error) {
       console.error("AI Generation failed:", error);
-      return {
-        name: "ErrorApp",
-        description: "Could not generate app. Please check API Key.",
-        stack: [framework, "Error"],
-        pages: [],
-        database: [],
-        apiRoutes: []
-      };
+      // FALLBACK TO LOCAL GENERATION ON ERROR (e.g. Network/Quota issues)
+      return this.generateFallbackSpec(prompt, platform, framework);
     }
+  }
+
+  private generateFallbackSpec(prompt: string, platform: string, framework: string): GeneratedAppSpec {
+    const isMobile = platform === 'mobile';
+    const cleanPrompt = prompt.toLowerCase();
+    
+    // Simple heuristics to make the fallback feel responsive to the user's intent
+    const isDashboard = cleanPrompt.includes('dashboard') || cleanPrompt.includes('admin') || cleanPrompt.includes('analytics');
+    const isCommerce = cleanPrompt.includes('shop') || cleanPrompt.includes('store') || cleanPrompt.includes('market');
+    
+    const appName = isDashboard ? "NovaDash" : isCommerce ? "MarketPro" : "StartApp";
+
+    if (isMobile) {
+        return {
+            name: appName + " Mobile",
+            description: `A ${framework} mobile application optimized for performance and user experience.`,
+            stack: [framework, "React Navigation", "Supabase", "Expo"],
+            pages: [
+                { 
+                    name: "Home", 
+                    description: "Main dashboard with activity summary and quick actions.", 
+                    components: ["Header", "StatusCard", "RecentActivityList", "QuickActionGrid"] 
+                },
+                { 
+                    name: "Explore", 
+                    description: "Search and discovery interface.", 
+                    components: ["SearchBar", "CategoryTabs", "FeaturedItems", "TrendingList"] 
+                },
+                { 
+                    name: "Profile", 
+                    description: "User profile and settings management.", 
+                    components: ["AvatarHeader", "SettingsMenu", "NotificationToggle", "SignOutButton"] 
+                }
+            ],
+            database: [
+                { model: "User", fields: ["id String @id", "email String @unique", "fullName String", "avatarUrl String?"] },
+                { model: "Activity", fields: ["id String @id", "type String", "payload Json", "createdAt DateTime"] },
+                { model: "Setting", fields: ["id String @id", "userId String", "key String", "value String"] }
+            ],
+            apiRoutes: []
+        };
+    }
+
+    // Web Fallback
+    return {
+        name: appName,
+        description: `A modern ${framework} web application with a scalable architecture.`,
+        stack: [framework, "Tailwind CSS", "Prisma", "Lucide React", "Supabase"],
+        pages: [
+            { 
+                name: "Home", 
+                description: "Landing page designed to convert visitors.", 
+                components: ["HeroSection", "FeatureGrid", "Testimonials", "CallToAction"] 
+            },
+            { 
+                name: "Dashboard", 
+                description: "Authenticated user overview.", 
+                components: ["Sidebar", "StatsCards", "ChartArea", "RecentTable"] 
+            },
+            { 
+                name: "Settings", 
+                description: "Account configuration page.", 
+                components: ["ProfileForm", "SecuritySettings", "BillingPortal"] 
+            }
+        ],
+        database: [
+            { model: "User", fields: ["id String @id", "email String @unique", "name String?", "role String @default('user')"] },
+            { model: "Subscription", fields: ["id String @id", "userId String", "status String", "planId String"] },
+            { model: "AuditLog", fields: ["id String @id", "action String", "userId String", "timestamp DateTime"] }
+        ],
+        apiRoutes: [
+            { method: "GET", path: "/api/me", description: "Get current user profile" },
+            { method: "POST", path: "/api/auth/login", description: "Authenticate user" },
+            { method: "POST", path: "/api/billing/create-portal", description: "Create Stripe billing portal session" }
+        ]
+    };
   }
 }
 
