@@ -149,8 +149,10 @@ class AppGeneratorService {
       Your goal is to accept a short app idea and generate a complete technical specification for a modern application.
       Context: ${context}
       
-      CRITICAL: You must EXACTLY satisfy the user's specific requests in the prompt (e.g., specific colors, features, names, or number of pages).
-      If the user specifies "Create a dashboard with 5 screens", you MUST generate 5 screens.
+      CRITICAL INSTRUCTIONS:
+      1. You must EXACTLY satisfy the user's specific requests in the prompt (e.g., specific colors, specific features, specific names).
+      2. If the user specifies "Create a dashboard with 5 screens", you MUST generate 5 screens in the 'pages' array.
+      3. If the user specifies specific API integrations (like Stripe, Supabase), include them in the 'stack' and 'apiRoutes'.
       
       Return a JSON object with:
       1. 'name': A creative name for the app.
@@ -431,8 +433,6 @@ const Header = ({ onViewChange, currentView, settings, user, onLogout }: { onVie
     </div>
   </nav>
 );
-
-// ... (InfoModal, DocsView, AuthView, FileTreeItem, SyntaxHighlighter components remain unchanged) ...
 
 const InfoModal = ({ title, onClose, children }: { title: string, onClose: () => void, children: React.ReactNode }) => (
   <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -1119,7 +1119,6 @@ const AdminSettingsView = ({ settings, onUpdate }: { settings: AppSettings, onUp
    );
 };
 
-// ... (MobileFrame, WebFrame, Content, AppInteractivePreview components remain unchanged) ...
 const MobileFrame = ({ children, isHome, onBack, appUrl }: { children?: React.ReactNode, isHome?: boolean, onBack?: () => void, appUrl?: string }) => {
   const [showQR, setShowQR] = useState(false);
 
@@ -1199,7 +1198,7 @@ const WebFrame = ({ children, spec, settings, activeRoute, onNavigate }: { child
 const Content = ({ spec, settings, isMobile, activeRoute, onNavigate }: { spec: GeneratedAppSpec, settings: AppSettings, isMobile: boolean, activeRoute: string, onNavigate: (route: string) => void }) => {
      if (activeRoute === 'home') {
         return (
-           <div className={`h-full flex flex-col font-sans ${isMobile ? 'bg-white' : 'bg-slate-5'}`}>
+           <div className={`h-full flex flex-col font-sans ${isMobile ? 'bg-white' : 'bg-slate-50'}`}>
               {!isMobile && (
                   <header className={`px-6 py-4 bg-white/80 backdrop-blur-md border-b border-gray-100 flex justify-between items-center z-10 sticky top-0`}>
                      <div className={`font-bold text-xl tracking-tight text-slate-900 cursor-pointer`} onClick={() => onNavigate('home')}>{spec.name}</div>
@@ -1317,7 +1316,7 @@ const BuilderChatInterface = ({ config, onViewChange, settings, apiKey }: { conf
   const [isGenerating, setIsGenerating] = useState(false);
   const [buildStep, setBuildStep] = useState<'initial' | 'planning' | 'review' | 'building' | 'complete'>('initial');
   const [previewMode, setPreviewMode] = useState<'blueprint' | 'app'>('blueprint');
-  const [selectedFile, setSelectedFile] = useState<string | null>('schema.prisma');
+  const [selectedFile, setSelectedFile] = useState<string | null>('package.json');
   
   const [integrations, setIntegrations] = useState({ github: false, supabase: false, resend: false, twilio: false });
   const [apiKeys, setApiKeys] = useState({ resend: '', twilio: '' });
@@ -1377,10 +1376,6 @@ const BuilderChatInterface = ({ config, onViewChange, settings, apiKey }: { conf
 
       for(let i=0; i<4; i++) { await new Promise(r => setTimeout(r, 800)); updateStatus(i); }
       
-      setSpec(generatedSpec);
-      setIsGenerating(false);
-      setBuildStep('review');
-      
       // Explicit breakdown message as requested
       const pageNames = generatedSpec.pages.map(p => `**${p.name}**`).join(', ');
       addMessage({ 
@@ -1389,12 +1384,17 @@ const BuilderChatInterface = ({ config, onViewChange, settings, apiKey }: { conf
           content: `I've analyzed your prompt for a **${cfg.platform}** app. 
           
 **Plan Breakdown:**
+*   **App Name:** ${generatedSpec.name}
 *   **Screens:** ${generatedSpec.pages.length} screens planned (${pageNames}).
 *   **Stack:** ${generatedSpec.stack.join(', ')}.
 *   **Core:** ${generatedSpec.description}
 
 Please review the full blueprint on the right.` 
       });
+      
+      setSpec(generatedSpec);
+      setIsGenerating(false);
+      setBuildStep('review');
 
     } catch (e) {
       console.error(e);
@@ -1506,6 +1506,19 @@ Please review the full blueprint on the right.`
          setRepoUrl(`https://github.com/user/${spec?.name.toLowerCase().replace(/\s+/g, '-')}`);
          addMessage({ role: 'assistant', type: 'text', content: `Successfully pushed code to GitHub!` });
     }, 4000);
+  };
+
+  const handleConnectIntegration = (type: 'supabase' | 'resend' | 'twilio') => {
+      setIntegrations(prev => ({...prev, [type]: true}));
+      let msg = "";
+      if (type === 'supabase') {
+         msg = `Connected to Supabase! (Mock: ${supabaseInputs.url})`;
+      } else if (type === 'resend') {
+         msg = "Resend API configured.";
+      } else {
+         msg = "Twilio SMS configured.";
+      }
+      addMessage({ role: 'assistant', type: 'text', content: msg });
   };
 
   return (
@@ -1697,11 +1710,25 @@ Please review the full blueprint on the right.`
                            ) : (
                               <FileTreeItem name="src" isFolder open>
                                  <FileTreeItem name="layout.tsx" onClick={() => setSelectedFile('layout.tsx')} isSelected={selectedFile === 'layout.tsx'} />
+                                 <FileTreeItem name="app" isFolder open>
+                                    {spec.pages.map(p => (
+                                        <FileTreeItem key={p.name} name={`${p.name}/page.tsx`} onClick={() => setSelectedFile(`src/app/${p.name}/page.tsx`)} isSelected={selectedFile === `src/app/${p.name}/page.tsx`} />
+                                    ))}
+                                 </FileTreeItem>
                               </FileTreeItem>
                            )}
+                           {integrations.supabase && <FileTreeItem name="supabase/migrations/init.sql" onClick={() => setSelectedFile('supabase/migrations/init.sql')} isSelected={selectedFile === 'supabase/migrations/init.sql'} />}
+                           {integrations.github && <FileTreeItem name=".github/workflows/ci.yml" onClick={() => setSelectedFile('.github/workflows/ci.yml')} isSelected={selectedFile === '.github/workflows/ci.yml'} />}
+                           {(integrations.resend || integrations.twilio || integrations.supabase) && <FileTreeItem name=".env" onClick={() => setSelectedFile('.env')} isSelected={selectedFile === '.env'} />}
                         </div>
                         <div className="col-span-9 bg-[#0d1117] p-0 overflow-auto">
-                           <SyntaxHighlighter code={generateFileContent(selectedFile || '')} />
+                           <div className="flex justify-between items-center bg-[#151923] px-4 py-2 border-b border-slate-800">
+                               <span className="text-xs font-mono text-slate-400">{selectedFile}</span>
+                               <button className="text-xs text-slate-400 hover:text-white flex items-center gap-1" onClick={() => navigator.clipboard.writeText(generateFileContent(selectedFile || ''))}><Copy className="w-3 h-3" /> Copy</button>
+                           </div>
+                           <div className="p-4">
+                               <SyntaxHighlighter code={generateFileContent(selectedFile || '')} />
+                           </div>
                         </div>
                      </div>
                   )}
@@ -1746,11 +1773,6 @@ Please review the full blueprint on the right.`
                                                     Push to Existing
                                                 </button>
                                             </div>
-
-                                            <div>
-                                                <label className="block text-xs font-medium text-slate-400 mb-1.5">Personal Access Token</label>
-                                                <input type="password" placeholder="ghp_..." className="w-full bg-[#0B0D12] border border-slate-700 rounded-lg px-4 py-2.5 text-white text-sm outline-none focus:border-blue-500" />
-                                            </div>
                                             
                                             {gitMode === 'new' ? (
                                                 <div>
@@ -1783,6 +1805,68 @@ Please review the full blueprint on the right.`
                                 </div>
                             )}
                         </div>
+                        
+                        {/* Supabase Card */}
+                        <div className="bg-[#151923] border border-slate-800 rounded-xl p-6">
+                            <div className="flex items-start justify-between mb-6">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 bg-emerald-900/20 rounded-lg flex items-center justify-center">
+                                        <Database className="w-6 h-6 text-emerald-400" />
+                                    </div>
+                                    <div>
+                                        <h3 className="font-bold text-white text-lg">Supabase</h3>
+                                        <p className="text-slate-400 text-sm">Database & Authentication.</p>
+                                    </div>
+                                </div>
+                                {integrations.supabase ? (
+                                    <span className="px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-500 text-xs font-medium border border-emerald-500/20">Connected</span>
+                                ) : (
+                                    <button onClick={() => handleConnectIntegration('supabase')} className="px-4 py-2 bg-white text-slate-900 rounded-lg text-sm font-bold hover:bg-slate-200">Connect</button>
+                                )}
+                            </div>
+                            {integrations.supabase && (
+                                <div className="space-y-4 border-t border-slate-800 pt-6">
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-400 mb-1.5">Project URL</label>
+                                            <input type="text" value={supabaseInputs.url} onChange={(e) => setSupabaseInputs({...supabaseInputs, url: e.target.value})} placeholder="https://xyz.supabase.co" className="w-full bg-[#0B0D12] border border-slate-700 rounded-lg px-4 py-2 text-white text-sm outline-none" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-400 mb-1.5">Anon Key</label>
+                                            <input type="password" value={supabaseInputs.key} onChange={(e) => setSupabaseInputs({...supabaseInputs, key: e.target.value})} placeholder="ey..." className="w-full bg-[#0B0D12] border border-slate-700 rounded-lg px-4 py-2 text-white text-sm outline-none" />
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center justify-between">
+                                        <div className="text-xs text-slate-500">Migrations created automatically</div>
+                                        <button className="text-emerald-400 hover:text-emerald-300 text-xs font-medium">Test Connection</button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Resend & Twilio Row */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                             <div className="bg-[#151923] border border-slate-800 rounded-xl p-6">
+                                <div className="flex items-center justify-between mb-4">
+                                    <div className="flex items-center gap-3">
+                                        <Mail className="w-5 h-5 text-white" />
+                                        <span className="font-bold text-white">Resend</span>
+                                    </div>
+                                    <button onClick={() => handleConnectIntegration('resend')} className="text-xs bg-slate-800 text-white px-3 py-1.5 rounded hover:bg-slate-700">Configure</button>
+                                </div>
+                                <p className="text-xs text-slate-400">Transactional emails API.</p>
+                             </div>
+                             <div className="bg-[#151923] border border-slate-800 rounded-xl p-6">
+                                <div className="flex items-center justify-between mb-4">
+                                    <div className="flex items-center gap-3">
+                                        <Smartphone className="w-5 h-5 text-white" />
+                                        <span className="font-bold text-white">Twilio</span>
+                                    </div>
+                                    <button onClick={() => handleConnectIntegration('twilio')} className="text-xs bg-slate-800 text-white px-3 py-1.5 rounded hover:bg-slate-700">Configure</button>
+                                </div>
+                                <p className="text-xs text-slate-400">SMS & Messaging API.</p>
+                             </div>
+                        </div>
                     </div>
                   )}
                </>
@@ -1792,3 +1876,212 @@ Please review the full blueprint on the right.`
     </div>
   );
 };
+
+const LandingView = ({ onStart, settings }: { onStart: (cfg: BuilderConfig) => void, settings: AppSettings }) => {
+  const [prompt, setPrompt] = useState('');
+  const [platform, setPlatform] = useState<'web' | 'mobile'>('web');
+  const [framework, setFramework] = useState('Next.js');
+  
+  const frameworks = platform === 'web' ? ['Next.js', 'React', 'Vue', 'Svelte'] : ['React Native', 'Flutter', 'SwiftUI', 'Expo'];
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (prompt.trim()) onStart({ prompt, platform, framework });
+  };
+
+  return (
+    <div className="min-h-screen bg-[#0f1117] relative overflow-hidden flex flex-col items-center justify-center p-4">
+       <div className="absolute top-0 left-0 w-full h-full bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 pointer-events-none"></div>
+       <div className="absolute -top-20 -left-20 w-[600px] h-[600px] bg-purple-600/10 rounded-full blur-3xl animate-pulse-slow"></div>
+       <div className="absolute top-1/2 right-0 w-[500px] h-[500px] bg-blue-600/10 rounded-full blur-3xl animate-pulse-slow"></div>
+       
+       <div className="relative z-10 max-w-3xl w-full text-center space-y-8">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-xs font-medium text-slate-400 mb-4 animate-fade-in-up">
+             <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> v2.0 Now Available with Gemini 3.0 Pro
+          </div>
+          
+          <h1 className="text-5xl md:text-7xl font-extrabold text-white tracking-tight leading-tight">
+             Build <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">anything</span> <br/> in seconds.
+          </h1>
+          
+          <p className="text-lg text-slate-400 max-w-2xl mx-auto leading-relaxed">
+             {settings.appName} transforms a single prompt into a production-ready full-stack application.
+             Database, Authentication, API, and UI — generated instantly.
+          </p>
+          
+          <div className="bg-[#151923]/80 backdrop-blur-xl border border-slate-700/50 p-2 rounded-2xl shadow-2xl transform transition-all hover:scale-[1.01] hover:border-slate-600">
+             <form onSubmit={handleSubmit} className="flex flex-col gap-2">
+                <div className="flex items-center gap-2 px-2 pt-2">
+                    <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800">
+                        <button type="button" onClick={() => { setPlatform('web'); setFramework('Next.js'); }} className={`px-3 py-1 rounded-md text-xs font-medium transition ${platform === 'web' ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-white'}`}>Web App</button>
+                        <button type="button" onClick={() => { setPlatform('mobile'); setFramework('React Native'); }} className={`px-3 py-1 rounded-md text-xs font-medium transition ${platform === 'mobile' ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-white'}`}>Mobile App</button>
+                    </div>
+                    <select value={framework} onChange={(e) => setFramework(e.target.value)} className="bg-slate-900 border border-slate-800 text-slate-300 text-xs rounded-lg px-3 py-1.5 outline-none focus:border-slate-600">
+                        {frameworks.map(f => <option key={f} value={f}>{f}</option>)}
+                    </select>
+                </div>
+                <div className="relative">
+                    <input 
+                      type="text" 
+                      value={prompt}
+                      onChange={(e) => setPrompt(e.target.value)}
+                      placeholder="Describe your dream app..." 
+                      className="w-full bg-transparent text-white px-6 py-4 outline-none placeholder:text-slate-500 text-lg"
+                      autoFocus
+                    />
+                    <button type="submit" disabled={!prompt.trim()} className="absolute right-2 top-1/2 -translate-y-1/2 bg-white text-slate-900 px-6 py-2.5 rounded-xl font-bold hover:bg-slate-200 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
+                       <Zap className="w-4 h-4 fill-current" /> Generate
+                    </button>
+                </div>
+             </form>
+          </div>
+          
+          <div className="pt-8 flex justify-center gap-8 text-slate-500 text-sm font-medium">
+             <span className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-blue-500" /> Production React Code</span>
+             <span className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-purple-500" /> Database Schema</span>
+             <span className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-green-500" /> One-Click Deploy</span>
+          </div>
+       </div>
+
+       <div className="absolute bottom-6 left-0 w-full text-center text-slate-600 text-xs">
+          Powered by Gemini 3.0 Pro • 100% Free & Open Source Template
+       </div>
+    </div>
+  );
+};
+
+const TokenUsageCard = ({ user }: { user: User }) => (
+    <div className="bg-gradient-to-br from-slate-900 to-slate-800 border border-slate-700 rounded-xl p-6 relative overflow-hidden">
+        <div className="absolute top-0 right-0 p-3 opacity-10"><Zap className="w-24 h-24 text-yellow-500" /></div>
+        <h3 className="text-white font-bold mb-1">Token Usage</h3>
+        <div className="text-3xl font-mono text-white mb-2">{user.tokenUsage.toLocaleString()} <span className="text-sm text-slate-400 font-sans">/ {user.tokenBalance.toLocaleString()}</span></div>
+        <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden mb-2">
+            <div className="h-full bg-yellow-500" style={{ width: `${(user.tokenUsage / user.tokenBalance) * 100}%` }}></div>
+        </div>
+        <p className="text-xs text-slate-400">Resets in 14 days.</p>
+    </div>
+);
+
+// --- APP ROOT ---
+
+const App = () => {
+  const [view, setView] = useState('landing');
+  const [settings, setSettings] = useState<AppSettings>({ appName: 'HelloJadanAI', primaryColor: '#7c3aed' });
+  const [providers, setProviders] = useState<ProviderConfig[]>(INITIAL_PROVIDERS);
+  const [builderConfig, setBuilderConfig] = useState<BuilderConfig | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+
+  const getApiKey = () => providers.find(p => p.type === 'llm' && p.status === 'active')?.apiKey;
+
+  const handleLogin = (email: string) => {
+    // Simulate login logic
+    const role = email.includes('admin') ? 'super_admin' : 'user';
+    const mockUser: User = {
+       id: 'u1', name: email.split('@')[0], email, role, status: 'active', plan: 'pro', createdAt: new Date().toISOString(),
+       tokenBalance: role === 'super_admin' ? 1000000 : 50000, tokenUsage: 0
+    };
+    setUser(mockUser);
+    if (builderConfig) {
+        setView('home');
+    } else if (role === 'super_admin') {
+        setView('admin-dash');
+    } else {
+        setView('home');
+    }
+  };
+
+  const handleLogout = () => {
+    setUser(null);
+    setView('landing');
+    setBuilderConfig(null);
+  };
+
+  const handleStartBuilder = (cfg: BuilderConfig) => {
+     setBuilderConfig(cfg);
+     if (!user) {
+         setView('auth');
+     } else {
+         setView('home');
+     }
+  };
+
+  // Views mapping
+  if (view === 'landing') return (
+     <>
+        <nav className="fixed w-full z-50 p-6 flex justify-between items-center text-sm font-medium">
+             <div className="flex items-center gap-2 font-bold text-white text-lg"><Rocket className="w-5 h-5 text-primary" /> {settings.appName}</div>
+             <div className="flex gap-6 text-slate-400">
+                <button onClick={() => setView('auth')} className="hover:text-white">Login</button>
+                <button className="text-white bg-white/10 px-4 py-2 rounded-full border border-white/10 hover:bg-white/20 transition">Get Started</button>
+             </div>
+        </nav>
+        <LandingView onStart={handleStartBuilder} settings={settings} />
+        {/* Simple Footer for Landing */}
+        <div className="fixed bottom-0 w-full p-4 flex justify-center gap-6 text-xs text-slate-500 bg-slate-950/80 backdrop-blur z-40 border-t border-slate-800/50">
+            <button onClick={() => alert("About modal")} className="hover:text-white">About Us</button>
+            <button onClick={() => alert("Contact modal")} className="hover:text-white">Contact</button>
+            <button onClick={() => alert("Privacy modal")} className="hover:text-white">Privacy Policy</button>
+            <button onClick={() => alert("Refund modal")} className="hover:text-white">Refund Policy</button>
+            <button onClick={() => alert("FAQ modal")} className="hover:text-white">FAQs</button>
+        </div>
+     </>
+  );
+
+  if (view === 'auth') return <AuthView onLogin={handleLogin} />;
+  
+  // Super Admin Layout
+  if (view.startsWith('admin-')) {
+     return (
+        <div className="flex min-h-screen bg-[#0f1117] font-sans">
+           <AdminSidebar currentView={view} onViewChange={setView} settings={settings} />
+           <div className="flex-1 overflow-y-auto">
+              <header className="h-16 border-b border-slate-800 flex items-center justify-between px-8 bg-slate-900 sticky top-0 z-10">
+                 <h2 className="font-semibold text-white">Dashboard</h2>
+                 <div className="flex items-center gap-4">
+                    <button className="p-2 text-slate-400 hover:text-white"><Zap className="w-5 h-5" /></button>
+                    <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white font-bold">{user?.name[0]}</div>
+                 </div>
+              </header>
+              {view === 'admin-dash' && <AdminDashboard />}
+              {view === 'admin-users' && <AdminUsers />}
+              {view === 'admin-tasks' && <AdminTasks />}
+              {view === 'admin-billing' && <AdminBilling />}
+              {view === 'admin-ai' && <AdminProviders providers={providers} onUpdate={setProviders} />}
+              {view === 'admin-settings' && <AdminSettingsView settings={settings} onUpdate={setSettings} />}
+           </div>
+        </div>
+     );
+  }
+
+  // App Builder Layout
+  return (
+    <div className="min-h-screen bg-[#0f1117] flex flex-col font-sans">
+      <Header onViewChange={setView} currentView={view} settings={settings} user={user} onLogout={handleLogout} />
+      {view === 'home' && builderConfig && <BuilderChatInterface config={builderConfig} onViewChange={setView} settings={settings} apiKey={getApiKey()} />}
+      {view === 'home' && !builderConfig && (
+          <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
+             <div className="bg-slate-900 p-8 rounded-2xl border border-slate-800 max-w-lg w-full">
+                <Rocket className="w-12 h-12 text-primary mx-auto mb-4" />
+                <h2 className="text-2xl font-bold text-white mb-2">Ready to build?</h2>
+                <p className="text-slate-400 mb-6">Start a new project from the landing page to configure your stack.</p>
+                <button onClick={() => setView('landing')} className="bg-primary text-white px-6 py-3 rounded-xl font-bold hover:opacity-90 transition w-full">Go to Start</button>
+             </div>
+             {user && <div className="mt-8 w-full max-w-lg"><TokenUsageCard user={user} /></div>}
+          </div>
+      )}
+      {view === 'docs' && <DocsView settings={settings} />}
+      {view === 'templates' && (
+          <div className="p-12 text-center">
+             <h1 className="text-3xl font-bold text-white mb-4">Templates Library</h1>
+             <p className="text-slate-400">Coming soon. Start with a prompt instead!</p>
+             <button onClick={() => setView('landing')} className="mt-6 text-primary hover:underline">Back to Builder</button>
+          </div>
+      )}
+    </div>
+  );
+};
+
+const rootElement = document.getElementById('root');
+if (!rootElement) throw new Error("Could not find root element to mount to");
+const root = createRoot(rootElement);
+root.render(<App />);
