@@ -2075,7 +2075,7 @@ const styles = StyleSheet.create({
   );
 };
 
-const LandingView = ({ onStartBuilder, onViewChange, settings }: { onStartBuilder: (cfg: BuilderConfig) => void, onViewChange: (v: string) => void, settings: AppSettings }) => {
+const LandingView = ({ onStartBuilder, onViewChange, settings, onUpdateSettings }: { onStartBuilder: (cfg: BuilderConfig) => void, onViewChange: (v: string) => void, settings: AppSettings, onUpdateSettings: (s: AppSettings) => void }) => {
   const [prompt, setPrompt] = useState("");
   const [platform, setPlatform] = useState<'web' | 'mobile'>('web');
   const [framework, setFramework] = useState('Next.js');
@@ -2141,6 +2141,17 @@ const LandingView = ({ onStartBuilder, onViewChange, settings }: { onStartBuilde
                     ))}
                  </select>
               </div>
+
+               <div className="bg-slate-900 border border-slate-800 rounded-lg px-4 py-2 flex items-center gap-3">
+                   <span className="text-xs text-slate-500 font-medium uppercase tracking-wider">Project Name</span>
+                   <input 
+                      type="text" 
+                      value={settings.appName}
+                      onChange={(e) => onUpdateSettings({...settings, appName: e.target.value})}
+                      className="bg-transparent text-white text-sm font-medium outline-none w-32 focus:w-48 transition-all"
+                      placeholder="My App"
+                   />
+                </div>
            </div>
 
            {/* Input */}
@@ -2188,7 +2199,7 @@ const App = () => {
   const renderContent = () => {
     switch(currentView) {
       case 'home':
-        return <LandingView onStartBuilder={handleStartBuilder} onViewChange={setCurrentView} settings={appSettings} />;
+        return <LandingView onStartBuilder={handleStartBuilder} onViewChange={setCurrentView} settings={appSettings} onUpdateSettings={setAppSettings} />;
       case 'builder':
         return <BuilderChatInterface config={builderConfig} onViewChange={setCurrentView} settings={appSettings} apiKey={geminiKey} />;
       case 'admin-dash':
@@ -2209,7 +2220,7 @@ const App = () => {
           </div>
         );
       default:
-        return <LandingView onStartBuilder={handleStartBuilder} onViewChange={setCurrentView} settings={appSettings} />;
+        return <LandingView onStartBuilder={handleStartBuilder} onViewChange={setCurrentView} settings={appSettings} onUpdateSettings={setAppSettings} />;
     }
   };
 
