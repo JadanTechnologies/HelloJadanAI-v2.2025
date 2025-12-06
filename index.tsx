@@ -836,35 +836,40 @@ const AdminSettingsView = ({ settings, onUpdate }: { settings: AppSettings, onUp
 
 // Fix: Make children optional in props type definition to resolve TS error
 const MobileFrame = ({ children, isHome, onBack }: { children?: React.ReactNode, isHome?: boolean, onBack?: () => void }) => (
-    <div className="max-w-[360px] mx-auto h-[700px] bg-[#000] rounded-[3rem] p-3 shadow-2xl relative border-4 border-slate-800 ring-4 ring-black">
-      {/* Dynamic Island / Notch */}
-      <div className="absolute top-3 left-1/2 -translate-x-1/2 h-7 w-28 bg-black rounded-full z-30 flex justify-center items-center">
-         <div className="w-20 h-5 bg-black rounded-full"></div>
-      </div>
+    <div className="relative mx-auto w-full max-w-[350px] h-full max-h-[800px] aspect-[9/19] bg-black rounded-[3rem] border-[8px] border-slate-900 shadow-2xl overflow-hidden ring-1 ring-slate-800/50">
+      {/* Notch */}
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 h-7 w-32 bg-slate-900 rounded-b-2xl z-30"></div>
+      
       {/* Screen */}
-      <div className="w-full h-full bg-white rounded-[2.2rem] overflow-hidden flex flex-col relative text-slate-900 z-10">
-         {/* Status Bar */}
-         <div className="h-12 bg-transparent flex justify-between items-center px-6 pt-3 select-none z-20 shrink-0 absolute top-0 w-full text-black font-semibold">
-            <span className="text-xs">9:41</span>
-            <div className="flex gap-1.5">
-               <Signal className="w-3.5 h-3.5" />
-               <Wifi className="w-3.5 h-3.5" />
-               <Battery className="w-3.5 h-3.5" />
+      <div className="w-full h-full bg-white rounded-[2.5rem] overflow-hidden flex flex-col relative">
+         {/* Status Bar Area */}
+         <div className="h-10 w-full bg-white/90 backdrop-blur z-20 flex items-center justify-between px-6 pt-2 text-[10px] font-bold text-black">
+            <span>9:41</span>
+            <div className="flex gap-1">
+               <Signal className="w-3 h-3" />
+               <Wifi className="w-3 h-3" />
+               <Battery className="w-3 h-3" />
             </div>
          </div>
-         {/* Back Button for non-home screens */}
-         {!isHome && onBack && (
-            <div className="absolute top-12 left-4 z-20">
-               <button onClick={onBack} className="p-2 bg-white/80 backdrop-blur rounded-full shadow-sm">
-                  <ArrowLeft className="w-5 h-5 text-slate-900" />
-               </button>
-            </div>
-         )}
-         <div className="flex-1 overflow-hidden flex flex-col pt-12">
-            {children}
+
+         {/* Content Container */}
+         <div className="flex-1 relative overflow-hidden flex flex-col">
+             {/* Back Button */}
+             {!isHome && onBack && (
+                <div className="absolute top-2 left-4 z-40">
+                   <button onClick={onBack} className="p-2 bg-white/50 backdrop-blur rounded-full shadow-sm hover:bg-white transition">
+                      <ArrowLeft className="w-5 h-5 text-slate-900" />
+                   </button>
+                </div>
+             )}
+             
+             {children}
          </div>
-         {/* Home Bar */}
-         <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-32 h-1.5 bg-slate-900 rounded-full opacity-40 z-30"></div>
+
+         {/* Home Indicator */}
+         <div className="h-5 w-full bg-white z-20 flex justify-center items-center pb-2">
+            <div className="w-32 h-1 bg-slate-900 rounded-full opacity-20"></div>
+         </div>
       </div>
     </div>
   );
@@ -1025,7 +1030,7 @@ const AppInteractivePreview = ({ spec, settings, platform }: { spec: GeneratedAp
   const [activeRoute, setActiveRoute] = useState('home');
 
   return isMobile ? (
-     <div className="flex items-center justify-center h-full py-2">
+     <div className="flex items-center justify-center h-full py-4 bg-slate-900/50">
        <MobileFrame isHome={activeRoute === 'home'} onBack={() => setActiveRoute('home')}>
           <Content spec={spec} settings={settings} isMobile={isMobile} activeRoute={activeRoute} onNavigate={setActiveRoute} />
        </MobileFrame>
@@ -1249,16 +1254,40 @@ const BuilderChatInterface = ({ config, onViewChange, settings, apiKey }: { conf
 
   const handleDownloadCode = () => {
     if (!spec) return;
-    // Simulate creating a zip/downloading
+    
+    // Construct a simulated "Project" object containing all files
+    const projectFiles: Record<string, string> = {
+        'package.json': generateFileContent('package.json'),
+        'README.md': generateFileContent('README.md'),
+        '.env': generateFileContent('.env'),
+    };
+    
+    if (config.platform === 'mobile') {
+        projectFiles['App.tsx'] = generateFileContent('App.tsx');
+        spec.pages.forEach(p => {
+            const fileName = `screens/${p.name.replace(/\s/g, '')}Screen.tsx`;
+            projectFiles[fileName] = generateFileContent(fileName);
+        });
+    } else {
+        projectFiles['src/app/layout.tsx'] = generateFileContent('layout.tsx');
+        spec.pages.forEach(p => {
+             const fileName = `${p.name.toLowerCase().replace(/\s/g, '-')}/page.tsx`;
+             projectFiles[`src/app/${fileName}`] = generateFileContent(fileName);
+        });
+    }
+
+    // Add Schema
+    projectFiles['prisma/schema.prisma'] = generateFileContent('schema.prisma');
+    
     const element = document.createElement("a");
-    const fileContent = JSON.stringify(spec, null, 2);
-    const file = new Blob([fileContent], {type: 'text/plain'});
+    const fileContent = JSON.stringify({ spec, files: projectFiles }, null, 2);
+    const file = new Blob([fileContent], {type: 'application/json'});
     element.href = URL.createObjectURL(file);
-    element.download = `${spec.name.toLowerCase().replace(/\s+/g, '-')}-source.json`;
+    element.download = `${spec.name.toLowerCase().replace(/\s+/g, '-')}-project.json`;
     document.body.appendChild(element);
     element.click();
     document.body.removeChild(element);
-    addMessage({ role: 'assistant', type: 'text', content: "✅ Source code downloaded." });
+    addMessage({ role: 'assistant', type: 'text', content: "✅ Full Source Code Project downloaded." });
   };
   
   const handleCopyCode = () => {
@@ -1289,6 +1318,39 @@ const BuilderChatInterface = ({ config, onViewChange, settings, apiKey }: { conf
           envContent += `TWILIO_ACCOUNT_SID="${apiKeys.twilio}"\n`;
        }
        return envContent;
+    }
+
+    if (fileName === 'package.json') {
+        return JSON.stringify({
+            name: spec.name.toLowerCase().replace(/\s+/g, '-'),
+            version: "0.1.0",
+            private: true,
+            scripts: {
+                dev: isMobile ? "expo start" : "next dev",
+                build: isMobile ? "eas build" : "next build",
+                start: isMobile ? "expo start" : "next start"
+            },
+            dependencies: {
+                react: "^18.2.0",
+                "react-dom": "^18.2.0",
+                ...(isMobile ? {
+                    "react-native": "0.72.6",
+                    "expo": "~49.0.15",
+                    "expo-status-bar": "~1.6.0",
+                    "@react-navigation/native": "^6.1.9",
+                    "@react-navigation/native-stack": "^6.9.17"
+                } : {
+                    "next": "14.0.3",
+                    "lucide-react": "^0.294.0",
+                    "clsx": "^2.0.0",
+                    "tailwind-merge": "^2.0.0"
+                })
+            }
+        }, null, 2);
+    }
+    
+    if (fileName === 'README.md') {
+        return `# ${spec.name}\n\n${spec.description}\n\n## Getting Started\n\n1. Install dependencies: \`npm install\`\n2. Run development server: \`npm run dev\``;
     }
 
     // GitHub Workflow realism
@@ -1899,7 +1961,7 @@ const styles = StyleSheet.create({
                          {/* Code Editor */}
                          <div className="col-span-9 bg-[#0d1117] border border-slate-800 rounded-xl flex flex-col overflow-hidden">
                             <div className="bg-[#151923] border-b border-slate-800 px-4 py-2 flex items-center justify-between">
-                               <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2">
                                   <FileCode className="w-4 h-4 text-blue-400" />
                                   <span className="text-sm font-medium text-slate-300">{selectedFile}</span>
                                </div>
