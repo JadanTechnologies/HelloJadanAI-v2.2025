@@ -10,7 +10,7 @@ import {
   Edit2, X, Server, PlayCircle, Check, Copy, Plus, Trash2, Palette,
   Mail, Smartphone, Cloud, ExternalLink, Key, Laptop, Tablet,
   Wifi, Battery, Signal, Menu, ArrowLeft, Home, CheckSquare, Calendar,
-  FileText
+  FileText, LogOut, Book, Coins, Activity, GitBranch, GitCommit
 } from 'lucide-react';
 
 // --- TYPES ---
@@ -23,6 +23,8 @@ interface User {
   status: 'active' | 'suspended';
   plan: 'free' | 'pro' | 'enterprise';
   createdAt: string;
+  tokenBalance: number;
+  tokenUsage: number;
 }
 
 interface Task {
@@ -67,10 +69,10 @@ interface BuilderConfig {
 // --- MOCK DATA ---
 
 const MOCK_USERS: User[] = [
-  { id: '1', name: 'Admin User', email: 'admin@hellojadan.ai', role: 'super_admin', status: 'active', plan: 'enterprise', createdAt: '2023-01-01' },
-  { id: '2', name: 'Alice Dev', email: 'alice@dev.co', role: 'user', status: 'active', plan: 'pro', createdAt: '2023-05-12' },
-  { id: '3', name: 'Bob Corp', email: 'bob@corp.inc', role: 'user', status: 'suspended', plan: 'free', createdAt: '2023-06-20' },
-  { id: '4', name: 'Startup Steve', email: 'steve@ycombinator.mock', role: 'user', status: 'active', plan: 'pro', createdAt: '2023-08-15' },
+  { id: '1', name: 'Admin User', email: 'admin@hellojadan.ai', role: 'super_admin', status: 'active', plan: 'enterprise', createdAt: '2023-01-01', tokenBalance: 1000000, tokenUsage: 45000 },
+  { id: '2', name: 'Alice Dev', email: 'alice@dev.co', role: 'user', status: 'active', plan: 'pro', createdAt: '2023-05-12', tokenBalance: 50000, tokenUsage: 12000 },
+  { id: '3', name: 'Bob Corp', email: 'bob@corp.inc', role: 'user', status: 'suspended', plan: 'free', createdAt: '2023-06-20', tokenBalance: 0, tokenUsage: 5000 },
+  { id: '4', name: 'Startup Steve', email: 'steve@ycombinator.mock', role: 'user', status: 'active', plan: 'pro', createdAt: '2023-08-15', tokenBalance: 75000, tokenUsage: 2500 },
 ];
 
 const MOCK_TASKS: Task[] = [
@@ -91,10 +93,25 @@ const INITIAL_PROVIDERS: ProviderConfig[] = [
 
 class AppGeneratorService {
   private ai: GoogleGenAI;
+  private apiKey: string;
 
   constructor(apiKey?: string) {
-    const key = apiKey && apiKey.trim() !== '' ? apiKey : (process.env.API_KEY || '');
-    this.ai = new GoogleGenAI({ apiKey: key });
+    this.apiKey = apiKey && apiKey.trim() !== '' ? apiKey : (process.env.API_KEY || '');
+    this.ai = new GoogleGenAI({ apiKey: this.apiKey });
+  }
+
+  async checkConnection(): Promise<boolean> {
+    try {
+        const model = this.ai.models;
+        await model.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: 'ping',
+        });
+        return true;
+    } catch (e) {
+        console.error("Connection check failed:", e);
+        return false;
+    }
   }
 
   async generateAppSpec(prompt: string, platform: string, framework: string): Promise<GeneratedAppSpec> {
@@ -122,7 +139,7 @@ class AppGeneratorService {
 
     try {
       const result = await model.generateContent({
-        model: 'gemini-2.5-flash', // Switched to flash for stability, can use gemini-3-pro-preview if key supports it
+        model: 'gemini-3-pro-preview', 
         contents: prompt,
         config: {
           systemInstruction: systemPrompt,
@@ -171,6 +188,93 @@ class AppGeneratorService {
       });
       
       const parsed = JSON.parse(result.text || '{}');
+      return this.sanitizeSpec(parsed);
+    } catch (error) {
+      console.error("AI Generation failed:", error);
+      // FALLBACK TO LOCAL GENERATION ON ERROR
+      return this.generateFallbackSpec(prompt, platform, framework);
+    }
+  }
+
+  async updateAppSpec(currentSpec: GeneratedAppSpec, updateInstruction: string): Promise<GeneratedAppSpec> {
+    const model = this.ai.models;
+    
+    const systemPrompt = `
+      You are a Senior Product Architect iterating on an existing application specification.
+      
+      Current App Name: ${currentSpec.name}
+      Current Description: ${currentSpec.description}
+      Current Pages: ${currentSpec.pages.map(p => p.name).join(', ')}
+      
+      User Instruction: "${updateInstruction}"
+      
+      Your task is to MODIFY the existing JSON specification based on the user's request.
+      - If they ask to add a page, add it to the 'pages' array.
+      - If they ask to change the tech stack, update the 'stack' array.
+      - If they ask to add a feature, add relevant components or API routes.
+      
+      Return the COMPLETELY UPDATED JSON object matching the original schema.
+    `;
+
+    try {
+      const result = await model.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: `Update this spec: ${JSON.stringify(currentSpec)}`,
+        config: {
+            systemInstruction: systemPrompt,
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  stack: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  pages: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        name: { type: Type.STRING },
+                        description: { type: Type.STRING },
+                        components: { type: Type.ARRAY, items: { type: Type.STRING } }
+                      }
+                    }
+                  },
+                  database: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        model: { type: Type.STRING },
+                        fields: { type: Type.ARRAY, items: { type: Type.STRING } }
+                      }
+                    }
+                  },
+                  apiRoutes: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        method: { type: Type.STRING },
+                        path: { type: Type.STRING },
+                        description: { type: Type.STRING }
+                      }
+                    }
+                  }
+                }
+            }
+        }
+      });
+
+      const parsed = JSON.parse(result.text || '{}');
+      return this.sanitizeSpec(parsed);
+    } catch (error) {
+        console.error("AI Update failed", error);
+        throw error;
+    }
+  }
+
+  private sanitizeSpec(parsed: any): GeneratedAppSpec {
       return {
         name: parsed.name || "Untitled App",
         description: parsed.description || "No description generated.",
@@ -179,27 +283,24 @@ class AppGeneratorService {
         database: Array.isArray(parsed.database) ? parsed.database : [],
         apiRoutes: Array.isArray(parsed.apiRoutes) ? parsed.apiRoutes : []
       };
-    } catch (error) {
-      console.error("AI Generation failed:", error);
-      // FALLBACK TO LOCAL GENERATION ON ERROR (e.g. Network/Quota issues)
-      return this.generateFallbackSpec(prompt, platform, framework);
-    }
   }
 
   private generateFallbackSpec(prompt: string, platform: string, framework: string): GeneratedAppSpec {
     const isMobile = platform === 'mobile';
     const cleanPrompt = prompt.toLowerCase();
     
-    // Simple heuristics to make the fallback feel responsive to the user's intent
-    const isDashboard = cleanPrompt.includes('dashboard') || cleanPrompt.includes('admin') || cleanPrompt.includes('analytics');
-    const isCommerce = cleanPrompt.includes('shop') || cleanPrompt.includes('store') || cleanPrompt.includes('market');
-    
-    const appName = isDashboard ? "NovaDash" : isCommerce ? "MarketPro" : "StartApp";
+    // Dynamic naming based on prompt
+    let appName = "StartApp";
+    if (cleanPrompt.includes('shop') || cleanPrompt.includes('store')) appName = "MarketMaster";
+    else if (cleanPrompt.includes('task') || cleanPrompt.includes('todo')) appName = "TaskFlow";
+    else if (cleanPrompt.includes('social') || cleanPrompt.includes('chat')) appName = "ConnectHub";
+    else if (cleanPrompt.includes('food') || cleanPrompt.includes('delivery')) appName = "TastyRun";
+    else if (cleanPrompt.includes('fit') || cleanPrompt.includes('health')) appName = "FitLife";
 
     if (isMobile) {
         return {
             name: appName + " Mobile",
-            description: `A ${framework} mobile application optimized for performance and user experience.`,
+            description: `A ${framework} mobile application optimized for performance. (Generated offline)`,
             stack: [framework, "React Navigation", "Supabase", "Expo"],
             pages: [
                 { 
@@ -227,10 +328,9 @@ class AppGeneratorService {
         };
     }
 
-    // Web Fallback
     return {
         name: appName,
-        description: `A modern ${framework} web application with a scalable architecture.`,
+        description: `A modern ${framework} web application. (Generated offline)`,
         stack: [framework, "Tailwind CSS", "Prisma", "Lucide React", "Supabase"],
         pages: [
             { 
@@ -265,7 +365,7 @@ class AppGeneratorService {
 
 // --- SHARED COMPONENTS ---
 
-const Header = ({ onViewChange, currentView, settings }: { onViewChange: (v: string) => void, currentView: string, settings: AppSettings }) => (
+const Header = ({ onViewChange, currentView, settings, user, onLogout }: { onViewChange: (v: string) => void, currentView: string, settings: AppSettings, user: User | null, onLogout: () => void }) => (
   <nav className="flex items-center justify-between px-8 py-4 border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-50">
     <div className="flex items-center gap-2 cursor-pointer" onClick={() => onViewChange('home')}>
       <Rocket className="w-6 h-6" style={{ color: settings.primaryColor }} />
@@ -277,13 +377,152 @@ const Header = ({ onViewChange, currentView, settings }: { onViewChange: (v: str
     <div className="flex items-center gap-6 text-sm font-medium text-slate-400">
       <button onClick={() => onViewChange('templates')} className={`hover:text-white transition ${currentView === 'templates' ? 'text-white' : ''}`}>Templates</button>
       <button onClick={() => onViewChange('docs')} className={`hover:text-white transition ${currentView === 'docs' ? 'text-white' : ''}`}>Docs</button>
-      <button onClick={() => onViewChange('admin-dash')} className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-full border border-slate-700 transition flex items-center gap-2">
-        <Lock className="w-3 h-3" />
-        Admin Panel
-      </button>
+      
+      {user ? (
+        <div className="flex items-center gap-4">
+           <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 rounded-full border border-slate-700">
+             <Coins className="w-3.5 h-3.5 text-yellow-500" />
+             <span className="text-slate-200 text-xs font-mono">{user.tokenBalance.toLocaleString()}</span>
+           </div>
+           <button onClick={() => onViewChange('admin-dash')} className="hover:text-white transition flex items-center gap-2">
+             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-xs">
+                {user.name.charAt(0)}
+             </div>
+           </button>
+           <button onClick={onLogout} className="text-slate-500 hover:text-white">
+             <LogOut className="w-4 h-4" />
+           </button>
+        </div>
+      ) : (
+        <button onClick={() => onViewChange('auth')} className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-full border border-slate-700 transition flex items-center gap-2">
+          Sign In
+        </button>
+      )}
     </div>
   </nav>
 );
+
+const DocsView = ({ settings }: { settings: AppSettings }) => (
+  <div className="flex min-h-screen bg-slate-950 text-slate-300">
+    <div className="w-64 border-r border-slate-800 p-6 hidden md:block sticky top-20 h-[calc(100vh-80px)] overflow-y-auto">
+      <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-4">Documentation</h3>
+      <ul className="space-y-3 text-sm">
+        <li className="text-white font-medium cursor-pointer">Introduction</li>
+        <li className="hover:text-white cursor-pointer">Quick Start</li>
+        <li className="hover:text-white cursor-pointer">Architecture</li>
+        <li className="hover:text-white cursor-pointer">App Builder</li>
+        <li className="hover:text-white cursor-pointer">Deploying</li>
+        <li className="mt-6 text-white font-medium cursor-pointer">API Reference</li>
+        <li className="hover:text-white cursor-pointer">Authentication</li>
+        <li className="hover:text-white cursor-pointer">Database</li>
+      </ul>
+    </div>
+    <div className="flex-1 p-8 md:p-12 max-w-4xl mx-auto">
+       <h1 className="text-4xl font-bold text-white mb-6">Introduction to {settings.appName}</h1>
+       <p className="text-lg leading-relaxed mb-8">
+         {settings.appName} is an AI-powered full-stack application generator. It transforms a single text prompt into a production-ready application structure, complete with database schema, API endpoints, and a React/Next.js frontend.
+       </p>
+       
+       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12">
+          <div className="p-6 bg-slate-900 border border-slate-800 rounded-xl">
+             <Zap className="w-6 h-6 text-yellow-500 mb-4" />
+             <h3 className="text-xl font-bold text-white mb-2">Instant Generation</h3>
+             <p className="text-sm">Generate complete app boilerplate in seconds using Gemini Flash 2.5.</p>
+          </div>
+          <div className="p-6 bg-slate-900 border border-slate-800 rounded-xl">
+             <Code className="w-6 h-6 text-blue-500 mb-4" />
+             <h3 className="text-xl font-bold text-white mb-2">Production Code</h3>
+             <p className="text-sm">Outputs clean, TypeScript React code with Tailwind CSS.</p>
+          </div>
+       </div>
+
+       <h2 className="text-2xl font-bold text-white mb-4">Getting Started</h2>
+       <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 font-mono text-sm mb-8">
+          <p className="text-slate-500"># Install dependencies</p>
+          <p className="text-white mb-4">npm install</p>
+          <p className="text-slate-500"># Run development server</p>
+          <p className="text-white">npm run dev</p>
+       </div>
+
+       <h2 className="text-2xl font-bold text-white mb-4">Deployment</h2>
+       <p className="mb-4">
+         We support one-click deployments to Vercel. Ensure you have your Vercel API token configured in the Admin Panel.
+       </p>
+    </div>
+  </div>
+);
+
+const AuthView = ({ onLogin }: { onLogin: () => void }) => {
+  const [isLogin, setIsLogin] = useState(true);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    // Mock Auth
+    onLogin();
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 relative overflow-hidden">
+       <div className="absolute top-0 left-0 w-full h-full bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 pointer-events-none"></div>
+       <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-purple-600/20 rounded-full blur-3xl"></div>
+       <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-blue-600/20 rounded-full blur-3xl"></div>
+       
+       <div className="bg-slate-900/50 backdrop-blur-xl border border-slate-800 p-8 rounded-2xl w-full max-w-md shadow-2xl relative z-10">
+          <div className="flex justify-center mb-6">
+             <div className="p-3 bg-slate-800 rounded-xl border border-slate-700">
+               <Rocket className="w-8 h-8 text-purple-500" />
+             </div>
+          </div>
+          <h2 className="text-2xl font-bold text-white text-center mb-2">
+            {isLogin ? "Welcome back" : "Create your account"}
+          </h2>
+          <p className="text-slate-400 text-center text-sm mb-8">
+            Enter your credentials to access the builder.
+          </p>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+               <label className="block text-xs font-medium text-slate-400 mb-1.5 uppercase tracking-wider">Email Address</label>
+               <input 
+                 type="email" 
+                 value={email}
+                 onChange={(e) => setEmail(e.target.value)}
+                 className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-purple-500 transition"
+                 placeholder="name@example.com"
+                 required
+               />
+            </div>
+            <div>
+               <label className="block text-xs font-medium text-slate-400 mb-1.5 uppercase tracking-wider">Password</label>
+               <input 
+                 type="password" 
+                 value={password}
+                 onChange={(e) => setPassword(e.target.value)}
+                 className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2.5 text-white outline-none focus:border-purple-500 transition"
+                 placeholder="••••••••"
+                 required
+               />
+            </div>
+            <button type="submit" className="w-full bg-purple-600 hover:bg-purple-700 text-white font-medium py-2.5 rounded-lg transition shadow-lg shadow-purple-900/20">
+              {isLogin ? "Sign In" : "Sign Up"}
+            </button>
+          </form>
+
+          <div className="mt-6 text-center text-sm">
+            <span className="text-slate-500">{isLogin ? "Don't have an account?" : "Already have an account?"}</span>
+            <button 
+              onClick={() => setIsLogin(!isLogin)}
+              className="ml-2 text-purple-400 hover:text-purple-300 font-medium"
+            >
+              {isLogin ? "Sign up" : "Log in"}
+            </button>
+          </div>
+       </div>
+    </div>
+  );
+};
 
 const FileTreeItem: React.FC<{ 
   name: string, 
@@ -324,7 +563,6 @@ const FileTreeItem: React.FC<{
 };
 
 const SyntaxHighlighter = ({ code }: { code: string }) => {
-  // Simple regex-based syntax highlighting for demo purposes
   const keywords = ['import', 'from', 'export', 'default', 'function', 'return', 'const', 'interface', 'type', 'async', 'await', 'CREATE', 'TABLE', 'INSERT', 'INTO', 'VALUES', 'PRIMARY', 'KEY', 'TEXT', 'BOOLEAN', 'TIMESTAMP'];
   const types = ['React', 'useState', 'useEffect', 'string', 'number', 'boolean', 'void', 'Promise', 'Metadata'];
   const components = ['div', 'span', 'h1', 'p', 'button', 'input', 'form', 'View', 'Text', 'StyleSheet', 'SafeAreaView', 'TouchableOpacity', 'Image'];
@@ -335,9 +573,6 @@ const SyntaxHighlighter = ({ code }: { code: string }) => {
     <div className="font-mono text-sm leading-6">
       {lines.map((line, i) => {
         let formattedLine: React.ReactNode[] = [];
-        let cursor = 0;
-        
-        // Very basic tokenization by splitting on spaces and common punctuation (kept simple)
         const parts = line.split(/(\s+|[{}();,<>=:])/);
         
         parts.forEach((part, idx) => {
@@ -366,7 +601,6 @@ const SyntaxHighlighter = ({ code }: { code: string }) => {
     </div>
   );
 };
-
 
 // --- ADMIN VIEWS ---
 
@@ -429,7 +663,6 @@ const AdminDashboard = () => (
          </div>
        ))}
     </div>
-    
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 h-80">
           <h3 className="font-semibold text-white mb-4">Recent Activity</h3>
@@ -441,28 +674,6 @@ const AdminDashboard = () => (
                    <div className="ml-auto text-xs text-slate-500">2m ago</div>
                 </div>
              ))}
-          </div>
-       </div>
-       <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 h-80">
-          <h3 className="font-semibold text-white mb-4">System Health</h3>
-          <div className="space-y-4">
-             <div className="flex justify-between text-sm text-slate-400 mb-1">
-                <span>API Latency</span>
-                <span className="text-green-400">45ms</span>
-             </div>
-             <div className="w-full bg-slate-800 rounded-full h-2"><div className="bg-green-500 h-2 rounded-full w-[20%]"></div></div>
-             
-             <div className="flex justify-between text-sm text-slate-400 mb-1 mt-4">
-                <span>Database Load</span>
-                <span className="text-yellow-400">62%</span>
-             </div>
-             <div className="w-full bg-slate-800 rounded-full h-2"><div className="bg-yellow-500 h-2 rounded-full w-[62%]"></div></div>
-
-             <div className="flex justify-between text-sm text-slate-400 mb-1 mt-4">
-                <span>AI Quota (Gemini)</span>
-                <span className="text-blue-400">45%</span>
-             </div>
-             <div className="w-full bg-slate-800 rounded-full h-2"><div className="bg-blue-500 h-2 rounded-full w-[45%]"></div></div>
           </div>
        </div>
     </div>
@@ -484,7 +695,7 @@ const AdminUsers = () => (
                  <th className="p-4">Name</th>
                  <th className="p-4">Role</th>
                  <th className="p-4">Status</th>
-                 <th className="p-4">Plan</th>
+                 <th className="p-4">Tokens</th>
                  <th className="p-4 text-right">Actions</th>
               </tr>
            </thead>
@@ -496,18 +707,12 @@ const AdminUsers = () => (
                        <div className="text-xs text-slate-500">{user.email}</div>
                     </td>
                     <td className="p-4">
-                       <span className="px-2 py-1 rounded-full text-xs font-medium bg-slate-800 border border-slate-700 text-slate-300">
-                          {user.role}
-                       </span>
+                       <span className="px-2 py-1 rounded-full text-xs font-medium bg-slate-800 border border-slate-700 text-slate-300">{user.role}</span>
                     </td>
                     <td className="p-4">
-                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                          user.status === 'active' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'
-                       }`}>
-                          {user.status}
-                       </span>
+                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${user.status === 'active' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>{user.status}</span>
                     </td>
-                    <td className="p-4 text-sm text-slate-300 capitalize">{user.plan}</td>
+                    <td className="p-4 text-sm text-slate-300">{user.tokenBalance.toLocaleString()}</td>
                     <td className="p-4 text-right">
                        <button className="text-slate-400 hover:text-white p-2 hover:bg-slate-800 rounded"><MoreVertical className="w-4 h-4" /></button>
                     </td>
@@ -530,53 +735,44 @@ const AdminTasks = () => {
     setIsEditing(false);
     setIsModalOpen(true);
   };
-
+  
   const handleOpenEdit = (task: Task) => {
-    setCurrentTask({ ...task });
+    setCurrentTask({...task});
     setIsEditing(true);
     setIsModalOpen(true);
   };
 
   const handleSaveTask = () => {
     if (!currentTask.title) return;
-    
     if (isEditing && currentTask.id) {
-       setTasks(tasks.map(t => t.id === currentTask.id ? { ...currentTask, id: t.id } as Task : t));
+        setTasks(tasks.map(t => t.id === currentTask.id ? { ...currentTask, id: t.id } as Task : t));
     } else {
-       const task: Task = {
-         id: Math.random().toString(36).substr(2, 9),
-         title: currentTask.title,
-         assignee: currentTask.assignee || 'Admin User',
-         status: currentTask.status || 'todo',
-         priority: currentTask.priority || 'medium',
-         dueDate: currentTask.dueDate || new Date().toISOString().split('T')[0]
-       };
-       setTasks([...tasks, task]);
+        const task: Task = {
+            id: Math.random().toString(36).substr(2, 9),
+            title: currentTask.title,
+            assignee: currentTask.assignee || 'Admin User',
+            status: currentTask.status || 'todo',
+            priority: currentTask.priority || 'medium',
+            dueDate: currentTask.dueDate || new Date().toISOString().split('T')[0]
+        };
+        setTasks([...tasks, task]);
     }
     setIsModalOpen(false);
   };
-
+  
   const toggleStatus = (id: string) => {
-    setTasks(tasks.map(t => {
-      if (t.id === id) {
-        return { ...t, status: t.status === 'done' ? 'todo' : 'done' };
-      }
-      return t;
-    }));
+    setTasks(tasks.map(t => t.id === id ? { ...t, status: t.status === 'done' ? 'todo' : 'done' } : t));
   };
-
+  
   const handleDelete = (id: string) => {
-    if(confirm('Delete this task?')) {
-       setTasks(tasks.filter(t => t.id !== id));
-    }
+    if (confirm('Delete task?')) setTasks(tasks.filter(t => t.id !== id));
   };
 
   const getPriorityColor = (p: string) => {
      switch(p) {
         case 'high': return 'bg-red-500/10 text-red-500';
         case 'medium': return 'bg-yellow-500/10 text-yellow-500';
-        case 'low': return 'bg-blue-500/10 text-blue-500';
-        default: return 'bg-slate-500/10 text-slate-500';
+        default: return 'bg-blue-500/10 text-blue-500';
      }
   };
 
@@ -592,53 +788,17 @@ const AdminTasks = () => {
       {isModalOpen && (
          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 w-full max-w-md shadow-2xl animate-accordion-down">
-               <h3 className="text-lg font-bold text-white mb-4">{isEditing ? 'Edit Task' : 'Create New Task'}</h3>
+               <h3 className="text-lg font-bold text-white mb-4">{isEditing ? 'Edit Task' : 'Create Task'}</h3>
                <div className="space-y-4">
-                  <div>
-                     <label className="text-xs text-slate-400 block mb-1">Title</label>
-                     <input 
-                       type="text" 
-                       className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white text-sm outline-none focus:border-primary"
-                       value={currentTask.title || ''}
-                       onChange={e => setCurrentTask({...currentTask, title: e.target.value})}
-                       placeholder="Enter task title"
-                       autoFocus
-                     />
-                  </div>
+                  <input type="text" className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white text-sm outline-none" value={currentTask.title || ''} onChange={e => setCurrentTask({...currentTask, title: e.target.value})} placeholder="Title" />
                   <div className="grid grid-cols-2 gap-4">
-                     <div>
-                        <label className="text-xs text-slate-400 block mb-1">Assignee</label>
-                        <input 
-                          type="text" 
-                          className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white text-sm outline-none focus:border-primary"
-                          value={currentTask.assignee || ''}
-                          onChange={e => setCurrentTask({...currentTask, assignee: e.target.value})}
-                          placeholder="Assignee"
-                        />
-                     </div>
-                     <div>
-                        <label className="text-xs text-slate-400 block mb-1">Due Date</label>
-                        <input 
-                          type="date" 
-                          className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white text-sm outline-none focus:border-primary"
-                          value={currentTask.dueDate || ''}
-                          onChange={e => setCurrentTask({...currentTask, dueDate: e.target.value})}
-                        />
-                     </div>
+                      <input type="text" className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white text-sm outline-none" value={currentTask.assignee || ''} onChange={e => setCurrentTask({...currentTask, assignee: e.target.value})} placeholder="Assignee" />
+                      <input type="date" className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-white text-sm outline-none" value={currentTask.dueDate || ''} onChange={e => setCurrentTask({...currentTask, dueDate: e.target.value})} />
                   </div>
-                  <div>
-                     <label className="text-xs text-slate-400 block mb-1">Priority</label>
-                     <div className="flex gap-2">
-                        {['low', 'medium', 'high'].map(p => (
-                           <button 
-                             key={p} 
-                             onClick={() => setCurrentTask({...currentTask, priority: p as any})}
-                             className={`px-3 py-1.5 rounded text-xs capitalize border ${currentTask.priority === p ? 'bg-primary border-primary text-white' : 'bg-slate-950 border-slate-700 text-slate-400'}`}
-                           >
-                              {p}
-                           </button>
-                        ))}
-                     </div>
+                  <div className="flex gap-2">
+                     {['low', 'medium', 'high'].map(p => (
+                         <button key={p} onClick={() => setCurrentTask({...currentTask, priority: p as any})} className={`px-3 py-1.5 rounded text-xs capitalize border ${currentTask.priority === p ? 'bg-primary border-primary text-white' : 'bg-slate-950 border-slate-700 text-slate-400'}`}>{p}</button>
+                     ))}
                   </div>
                </div>
                <div className="flex justify-end gap-3 mt-6">
@@ -650,38 +810,23 @@ const AdminTasks = () => {
       )}
 
       <div className="space-y-3">
-         {tasks.length === 0 && (
-            <div className="text-center py-10 text-slate-500">No tasks found. Create one to get started.</div>
-         )}
          {tasks.map(task => (
            <div key={task.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex items-center justify-between group hover:border-slate-700 transition">
               <div className="flex items-center gap-4">
-                 <button onClick={() => toggleStatus(task.id)} className={`w-6 h-6 rounded border flex items-center justify-center transition ${task.status === 'done' ? 'bg-green-500 border-green-500 text-white' : 'border-slate-600 hover:border-slate-500 text-transparent'}`}>
-                    <Check className="w-4 h-4" />
-                 </button>
+                 <button onClick={() => toggleStatus(task.id)} className={`w-6 h-6 rounded border flex items-center justify-center transition ${task.status === 'done' ? 'bg-green-500 border-green-500 text-white' : 'border-slate-600 hover:border-slate-500 text-transparent'}`}><Check className="w-4 h-4" /></button>
                  <div>
                     <h4 className={`font-medium ${task.status === 'done' ? 'text-slate-500 line-through' : 'text-white'}`}>{task.title}</h4>
                     <div className="flex items-center gap-4 mt-1">
-                       <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                          <Users className="w-3 h-3" /> {task.assignee}
-                       </div>
-                       <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                          <Calendar className="w-3 h-3" /> {task.dueDate}
-                       </div>
+                       <div className="flex items-center gap-1.5 text-xs text-slate-500"><Users className="w-3 h-3" /> {task.assignee}</div>
+                       <div className="flex items-center gap-1.5 text-xs text-slate-500"><Calendar className="w-3 h-3" /> {task.dueDate}</div>
                     </div>
                  </div>
               </div>
               <div className="flex items-center gap-3">
-                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${getPriorityColor(task.priority)}`}>
-                    {task.priority}
-                 </span>
+                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${getPriorityColor(task.priority)}`}>{task.priority}</span>
                  <div className="flex items-center opacity-0 group-hover:opacity-100 transition">
-                    <button onClick={() => handleOpenEdit(task)} className="text-slate-500 hover:text-white p-2">
-                       <Edit2 className="w-4 h-4" />
-                    </button>
-                    <button onClick={() => handleDelete(task.id)} className="text-slate-500 hover:text-red-400 p-2">
-                       <Trash2 className="w-4 h-4" />
-                    </button>
+                    <button onClick={() => handleOpenEdit(task)} className="text-slate-500 hover:text-white p-2"><Edit2 className="w-4 h-4" /></button>
+                    <button onClick={() => handleDelete(task.id)} className="text-slate-500 hover:text-red-400 p-2"><Trash2 className="w-4 h-4" /></button>
                  </div>
               </div>
            </div>
@@ -694,6 +839,7 @@ const AdminTasks = () => {
 const AdminProviders = ({ providers, onUpdate }: { providers: ProviderConfig[], onUpdate: (p: ProviderConfig[]) => void }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [tempKey, setTempKey] = useState("");
+  const [testingId, setTestingId] = useState<string | null>(null);
 
   const handleEdit = (p: ProviderConfig) => {
     setEditingId(p.id);
@@ -704,6 +850,15 @@ const AdminProviders = ({ providers, onUpdate }: { providers: ProviderConfig[], 
     onUpdate(providers.map(p => p.id === id ? { ...p, apiKey: tempKey } : p));
     setEditingId(null);
     setTempKey("");
+  };
+
+  const handleTestConnection = async (p: ProviderConfig) => {
+     if (!p.apiKey) return alert("No API key to test.");
+     setTestingId(p.id);
+     const service = new AppGeneratorService(p.apiKey);
+     const success = await service.checkConnection();
+     setTestingId(null);
+     alert(success ? "Connection Successful! API is working." : "Connection Failed. Check your API key or network.");
   };
 
   return (
@@ -723,14 +878,8 @@ const AdminProviders = ({ providers, onUpdate }: { providers: ProviderConfig[], 
                        {p.name}
                        {p.status === 'inactive' && <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-500">Inactive</span>}
                     </h3>
-                    <div className="text-xs text-slate-500 mt-1 flex items-center gap-3">
-                       <span>Type: {p.type}</span>
-                       <span>•</span>
-                       <span>Priority: {p.priority}</span>
-                    </div>
                  </div>
               </div>
-              
               <div className="flex items-center gap-4 w-full md:w-auto">
                  {editingId === p.id ? (
                    <div className="flex items-center gap-2 w-full md:w-auto">
@@ -745,25 +894,19 @@ const AdminProviders = ({ providers, onUpdate }: { providers: ProviderConfig[], 
                       <button onClick={() => setEditingId(null)} className="text-slate-400 hover:text-white px-2">Cancel</button>
                    </div>
                  ) : (
-                   <div className="flex items-center gap-6 w-full md:w-auto justify-between md:justify-end">
-                      <div className="text-right hidden md:block">
-                         <div className="text-xs text-slate-500 mb-1">Usage Quota</div>
-                         <div className="w-32 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                            <div className="bg-blue-500 h-full rounded-full" style={{ width: `${p.usage}%` }}></div>
-                         </div>
-                      </div>
-                      <div className="flex gap-2">
-                         <button 
-                           onClick={() => handleEdit(p)}
-                           className="px-3 py-1.5 rounded-md bg-slate-800 text-slate-300 text-sm font-medium hover:bg-slate-700 hover:text-white transition flex items-center gap-2"
-                         >
-                            <Code className="w-3.5 h-3.5" />
-                            {p.apiKey ? 'Update Key' : 'Add Key'}
-                         </button>
-                         <button className="p-2 rounded-md hover:bg-slate-800 text-slate-400 hover:text-white">
-                            <Settings className="w-4 h-4" />
-                         </button>
-                      </div>
+                   <div className="flex gap-2">
+                      {p.type === 'llm' && (
+                          <button onClick={() => handleTestConnection(p)} className="px-3 py-1.5 rounded-md bg-slate-800 text-blue-400 text-sm hover:bg-slate-700 flex items-center gap-1">
+                              {testingId === p.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Activity className="w-3 h-3" />} Test
+                          </button>
+                      )}
+                      <button 
+                        onClick={() => handleEdit(p)}
+                        className="px-3 py-1.5 rounded-md bg-slate-800 text-slate-300 text-sm font-medium hover:bg-slate-700 hover:text-white transition flex items-center gap-2"
+                      >
+                         <Code className="w-3.5 h-3.5" />
+                         {p.apiKey ? 'Update Key' : 'Add Key'}
+                      </button>
                    </div>
                  )}
               </div>
@@ -785,48 +928,18 @@ const AdminSettingsView = ({ settings, onUpdate }: { settings: AppSettings, onUp
    return (
       <div className="p-8 max-w-2xl">
          <h1 className="text-2xl font-bold text-white mb-6">Settings & Branding</h1>
-         
-         <div className="space-y-6">
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-               <h3 className="font-semibold text-white mb-4 flex items-center gap-2">
-                  <Palette className="w-4 h-4" /> Brand Identity
-               </h3>
-               
-               <div className="space-y-4">
-                  <div>
-                     <label className="block text-sm text-slate-400 mb-1">Application Name</label>
-                     <input 
-                        type="text" 
-                        value={localSettings.appName}
-                        onChange={(e) => setLocalSettings({...localSettings, appName: e.target.value})}
-                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 text-white focus:border-primary outline-none transition"
-                     />
-                  </div>
-                  
-                  <div>
-                     <label className="block text-sm text-slate-400 mb-1">Primary Color</label>
-                     <div className="flex items-center gap-3">
-                        <input 
-                           type="color" 
-                           value={localSettings.primaryColor}
-                           onChange={(e) => setLocalSettings({...localSettings, primaryColor: e.target.value})}
-                           className="h-10 w-20 bg-transparent cursor-pointer rounded overflow-hidden"
-                        />
-                        <div className="text-sm text-slate-500 font-mono">{localSettings.primaryColor}</div>
-                     </div>
-                  </div>
-               </div>
-
-               <div className="mt-8 pt-6 border-t border-slate-800 flex justify-end">
-                  <button 
-                     onClick={handleSave}
-                     className="bg-primary text-white px-6 py-2 rounded-lg font-medium hover:opacity-90 transition"
-                     style={{ backgroundColor: localSettings.primaryColor }}
-                  >
-                     Save Changes
-                  </button>
-               </div>
-            </div>
+         <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4">
+             <div>
+                 <label className="block text-sm text-slate-400 mb-1">Application Name</label>
+                 <input type="text" value={localSettings.appName} onChange={(e) => setLocalSettings({...localSettings, appName: e.target.value})} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-2 text-white focus:border-primary outline-none" />
+             </div>
+             <div>
+                 <label className="block text-sm text-slate-400 mb-1">Primary Color</label>
+                 <div className="flex items-center gap-3">
+                    <input type="color" value={localSettings.primaryColor} onChange={(e) => setLocalSettings({...localSettings, primaryColor: e.target.value})} className="h-10 w-20 bg-transparent cursor-pointer rounded overflow-hidden" />
+                 </div>
+             </div>
+             <button onClick={handleSave} className="bg-primary text-white px-6 py-2 rounded-lg font-medium hover:opacity-90 transition mt-4" style={{ backgroundColor: localSettings.primaryColor }}>Save Changes</button>
          </div>
       </div>
    );
@@ -834,27 +947,15 @@ const AdminSettingsView = ({ settings, onUpdate }: { settings: AppSettings, onUp
 
 // --- BUILDER COMPONENTS ---
 
-// Fix: Make children optional in props type definition to resolve TS error
 const MobileFrame = ({ children, isHome, onBack }: { children?: React.ReactNode, isHome?: boolean, onBack?: () => void }) => (
     <div className="relative mx-auto w-full max-w-[350px] h-full max-h-[800px] aspect-[9/19] bg-black rounded-[3rem] border-[8px] border-slate-900 shadow-2xl overflow-hidden ring-1 ring-slate-800/50">
-      {/* Notch */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 h-7 w-32 bg-slate-900 rounded-b-2xl z-30"></div>
-      
-      {/* Screen */}
-      <div className="w-full h-full bg-white rounded-[2.5rem] overflow-hidden flex flex-col relative">
-         {/* Status Bar Area */}
-         <div className="h-10 w-full bg-white/90 backdrop-blur z-20 flex items-center justify-between px-6 pt-2 text-[10px] font-bold text-black">
+      <div className="w-full h-full bg-white rounded-[2.5rem] overflow-hidden flex flex-col relative z-0">
+         <div className="h-10 w-full bg-white/90 backdrop-blur z-20 flex items-center justify-between px-6 pt-2 text-[10px] font-bold text-black border-b border-transparent">
             <span>9:41</span>
-            <div className="flex gap-1">
-               <Signal className="w-3 h-3" />
-               <Wifi className="w-3 h-3" />
-               <Battery className="w-3 h-3" />
-            </div>
+            <div className="flex gap-1"><Signal className="w-3 h-3" /><Wifi className="w-3 h-3" /><Battery className="w-3 h-3" /></div>
          </div>
-
-         {/* Content Container */}
-         <div className="flex-1 relative overflow-hidden flex flex-col">
-             {/* Back Button */}
+         <div className="flex-1 relative overflow-hidden flex flex-col bg-white">
              {!isHome && onBack && (
                 <div className="absolute top-2 left-4 z-40">
                    <button onClick={onBack} className="p-2 bg-white/50 backdrop-blur rounded-full shadow-sm hover:bg-white transition">
@@ -862,92 +963,60 @@ const MobileFrame = ({ children, isHome, onBack }: { children?: React.ReactNode,
                    </button>
                 </div>
              )}
-             
              {children}
          </div>
-
-         {/* Home Indicator */}
          <div className="h-5 w-full bg-white z-20 flex justify-center items-center pb-2">
             <div className="w-32 h-1 bg-slate-900 rounded-full opacity-20"></div>
          </div>
       </div>
     </div>
-  );
+);
 
-  // Fix: Make children optional in props type definition to resolve TS error
-  const WebFrame = ({ children, spec, settings, activeRoute, onNavigate }: { children?: React.ReactNode, spec: GeneratedAppSpec, settings: AppSettings, activeRoute: string, onNavigate: (r: string) => void }) => (
+const WebFrame = ({ children, spec, settings, activeRoute, onNavigate }: { children?: React.ReactNode, spec: GeneratedAppSpec, settings: AppSettings, activeRoute: string, onNavigate: (r: string) => void }) => (
      <div className="w-full h-full bg-white rounded-lg border border-slate-800 shadow-2xl overflow-hidden flex flex-col text-slate-900">
-        {/* Browser Chrome */}
         <div className="bg-slate-100 border-b border-slate-200 p-3 flex items-center gap-4 flex-shrink-0">
-             <div className="flex gap-1.5 ml-1">
-                <div className="w-3 h-3 rounded-full bg-red-400"></div>
-                <div className="w-3 h-3 rounded-full bg-yellow-400"></div>
-                <div className="w-3 h-3 rounded-full bg-green-400"></div>
-             </div>
-             <div className="flex gap-2">
-                 <button onClick={() => onNavigate('home')} className="p-1 hover:bg-slate-200 rounded text-slate-500">
-                    <Home className="w-4 h-4" />
-                 </button>
-             </div>
+             <div className="flex gap-1.5 ml-1"><div className="w-3 h-3 rounded-full bg-red-400"></div><div className="w-3 h-3 rounded-full bg-yellow-400"></div><div className="w-3 h-3 rounded-full bg-green-400"></div></div>
+             <div className="flex gap-2"><button onClick={() => onNavigate('home')} className="p-1 hover:bg-slate-200 rounded text-slate-500"><Home className="w-4 h-4" /></button></div>
              <div className="flex-1 bg-white border border-slate-300 rounded-md px-4 py-1.5 text-xs text-slate-600 flex items-center shadow-sm font-mono truncate">
                 <Lock className="w-3 h-3 mr-2 text-green-600" />
-                https://{spec.name.toLowerCase().replace(/\s+/g, '-')}.{settings.appName.toLowerCase().replace(/\s+/g, '')}.com{activeRoute !== 'home' ? `/${activeRoute}` : ''}
+                https://{spec.name.toLowerCase().replace(/\s+/g, '-')}.app.com{activeRoute !== 'home' ? `/${activeRoute}` : ''}
              </div>
         </div>
-        <div className="flex-1 overflow-auto relative flex flex-col">
+        <div className="flex-1 overflow-auto relative flex flex-col bg-white">
            {children}
         </div>
      </div>
-  );
+);
 
-  const Content = ({ spec, settings, isMobile, activeRoute, onNavigate }: { spec: GeneratedAppSpec, settings: AppSettings, isMobile: boolean, activeRoute: string, onNavigate: (route: string) => void }) => {
-     // Render Home Page
+const Content = ({ spec, settings, isMobile, activeRoute, onNavigate }: { spec: GeneratedAppSpec, settings: AppSettings, isMobile: boolean, activeRoute: string, onNavigate: (route: string) => void }) => {
      if (activeRoute === 'home') {
         return (
-           <div className="h-full flex flex-col font-sans bg-slate-50">
-              {/* Mock App Header */}
+           <div className={`h-full flex flex-col font-sans ${isMobile ? 'bg-white' : 'bg-slate-50'}`}>
               {!isMobile && (
                   <header className={`px-6 py-4 bg-white/80 backdrop-blur-md border-b border-gray-100 flex justify-between items-center z-10 sticky top-0`}>
                      <div className={`font-bold text-xl tracking-tight text-slate-900 cursor-pointer`} onClick={() => onNavigate('home')}>{spec.name}</div>
                      <div className="flex gap-6 text-sm font-medium text-slate-600">
-                        {spec.pages.slice(0, 3).map(p => (
-                           <span key={p.name} onClick={() => onNavigate(p.name)} className="hover:text-blue-600 cursor-pointer">{p.name}</span>
-                        ))}
+                        {spec.pages.slice(0, 3).map(p => (<span key={p.name} onClick={() => onNavigate(p.name)} className="hover:text-blue-600 cursor-pointer">{p.name}</span>))}
                      </div>
-                     <button className="text-white px-4 py-1.5 rounded-full text-xs font-bold" style={{ backgroundColor: settings.primaryColor }}>
-                       Sign In
-                     </button>
+                     <button className="text-white px-4 py-1.5 rounded-full text-xs font-bold" style={{ backgroundColor: settings.primaryColor }}>Sign In</button>
                   </header>
               )}
-              
               <main className={`flex-1 overflow-y-auto ${isMobile ? 'no-scrollbar' : ''}`} style={isMobile ? { scrollbarWidth: 'none' } : {}}>
                  <section className={`${isMobile ? 'py-6 px-4 pt-4' : 'py-20 px-6'} text-center ${!isMobile && 'bg-gradient-to-b from-slate-50 to-white'}`}>
-                    {!isMobile && (
-                        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 text-blue-600 text-[10px] font-bold uppercase tracking-wider border border-blue-100 mb-4">
-                           New Release v1.0
-                        </div>
-                    )}
                     <h1 className={`${isMobile ? 'text-2xl mt-4' : 'text-5xl'} font-extrabold text-slate-900 leading-tight mb-4`}>
                        {spec.name} is <span style={{ color: settings.primaryColor }}>here</span>.
                     </h1>
-                    <p className={`${isMobile ? 'text-sm' : 'text-lg'} text-slate-600 max-w-xl mx-auto leading-relaxed mb-6`}>
-                       {spec.description}
-                    </p>
+                    <p className={`${isMobile ? 'text-sm' : 'text-lg'} text-slate-600 max-w-xl mx-auto leading-relaxed mb-6`}>{spec.description}</p>
                     <div className="flex items-center justify-center gap-3">
-                       <button onClick={() => onNavigate(spec.pages[0]?.name || 'home')} className="px-6 py-3 text-white rounded-full font-bold text-sm shadow-lg w-full md:w-auto" style={{ backgroundColor: settings.primaryColor }}>
-                          Get Started
-                       </button>
+                       <button onClick={() => onNavigate(spec.pages[0]?.name || 'home')} className="px-6 py-3 text-white rounded-full font-bold text-sm shadow-lg w-full md:w-auto" style={{ backgroundColor: settings.primaryColor }}>Get Started</button>
                     </div>
                  </section>
-                 
                  <section className={`${isMobile ? 'py-4 px-4' : 'py-20 px-6'} bg-transparent`}>
                     <h2 className={`${isMobile ? 'text-lg' : 'text-2xl'} font-bold text-slate-900 mb-4 ${isMobile ? 'text-left' : 'text-center'}`}>Discover</h2>
                     <div className={`grid ${isMobile ? 'grid-cols-1 gap-3' : 'grid-cols-3 gap-6'}`}>
                         {spec.pages.map((page, idx) => (
                            <div key={idx} onClick={() => onNavigate(page.name)} className={`p-4 rounded-2xl border border-slate-100 bg-white shadow-sm hover:shadow-md transition cursor-pointer flex items-center gap-4 ${isMobile ? 'flex-row' : 'flex-col text-center'}`}>
-                              <div className={`w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center shrink-0`} style={{ color: settings.primaryColor }}>
-                                 <Layout className="w-5 h-5" />
-                              </div>
+                              <div className={`w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center shrink-0`} style={{ color: settings.primaryColor }}><Layout className="w-5 h-5" /></div>
                               <div>
                                  <h3 className="font-bold text-slate-900 text-sm md:text-base">{page.name}</h3>
                                  <p className="text-xs text-slate-500 line-clamp-1">{page.description}</p>
@@ -958,17 +1027,14 @@ const MobileFrame = ({ children, isHome, onBack }: { children?: React.ReactNode,
                     </div>
                  </section>
               </main>
-              
               {isMobile && (
                  <div className="h-16 border-t border-slate-100 flex justify-around items-center px-4 bg-white/90 backdrop-blur shrink-0 pb-2">
                     <div className="flex flex-col items-center gap-1 cursor-pointer" onClick={() => onNavigate('home')}>
-                        <Home className="w-6 h-6 text-slate-900" />
-                        <span className="text-[10px] font-medium text-slate-900">Home</span>
+                        <Home className="w-6 h-6 text-slate-900" /><span className="text-[10px] font-medium text-slate-900">Home</span>
                     </div>
                     {spec.pages.slice(0, 3).map((p, i) => (
                        <div key={i} className="flex flex-col items-center gap-1 cursor-pointer" onClick={() => onNavigate(p.name)}>
-                          <div className={`w-6 h-6 rounded-md bg-slate-200`}></div>
-                          <span className="text-[10px] font-medium text-slate-400">{p.name.slice(0,5)}</span>
+                          <div className={`w-6 h-6 rounded-md bg-slate-200`}></div><span className="text-[10px] font-medium text-slate-400">{p.name.slice(0,5)}</span>
                        </div>
                     ))}
                  </div>
@@ -976,61 +1042,37 @@ const MobileFrame = ({ children, isHome, onBack }: { children?: React.ReactNode,
            </div>
         );
      } 
-     
-     // Render Specific Page
      const page = spec.pages.find(p => p.name === activeRoute);
      return (
         <div className="h-full flex flex-col font-sans bg-white">
            {!isMobile && (
                <header className={`px-6 py-4 border-b border-gray-100 flex justify-between items-center sticky top-0 bg-white z-10`}>
-                    <div className="flex items-center gap-2">
-                       <div className="font-bold text-xl text-slate-900 cursor-pointer" onClick={() => onNavigate('home')}>{spec.name}</div>
-                       <ChevronRight className="w-4 h-4 text-slate-400" />
-                       <div className="font-semibold text-slate-900">{page?.name}</div>
-                    </div>
+                    <div className="flex items-center gap-2"><div className="font-bold text-xl text-slate-900 cursor-pointer" onClick={() => onNavigate('home')}>{spec.name}</div><ChevronRight className="w-4 h-4 text-slate-400" /><div className="font-semibold text-slate-900">{page?.name}</div></div>
                     <button className="text-sm font-medium text-slate-500 hover:text-slate-900" onClick={() => onNavigate('home')}>Back Home</button>
                </header>
            )}
            <main className={`flex-1 overflow-y-auto ${isMobile ? 'p-4 no-scrollbar' : 'p-6'}`} style={isMobile ? { scrollbarWidth: 'none' } : {}}>
               <h2 className={`${isMobile ? 'text-2xl mt-2' : 'text-3xl'} font-bold text-slate-900 mb-2`}>{page?.name}</h2>
               <p className="text-slate-500 mb-8 text-sm leading-relaxed">{page?.description}</p>
-              
-              {/* Mock Components */}
               <div className="space-y-4">
                   {page?.components.map((comp, idx) => (
                      <div key={idx} className="p-4 border border-slate-100 rounded-2xl bg-slate-50 shadow-sm">
                         <div className="text-[10px] font-mono text-slate-400 mb-2 uppercase tracking-wide opacity-50">{comp} Component</div>
-                        <div className="h-24 bg-white rounded-xl border border-slate-200 flex items-center justify-center text-slate-400 text-sm">
-                           Preview: {comp}
-                        </div>
+                        <div className="h-24 bg-white rounded-xl border border-slate-200 flex items-center justify-center text-slate-400 text-sm">Preview: {comp}</div>
                      </div>
                   ))}
               </div>
            </main>
-           {isMobile && (
-              <div className="h-16 border-t border-slate-100 flex justify-around items-center px-4 bg-white/90 backdrop-blur shrink-0 pb-2">
-                 <div className="flex flex-col items-center gap-1 cursor-pointer" onClick={() => onNavigate('home')}>
-                     <Home className="w-6 h-6 text-slate-400" />
-                     <span className="text-[10px] font-medium text-slate-400">Home</span>
-                 </div>
-                 {spec.pages.slice(0, 3).map((p, i) => (
-                    <div key={i} className="flex flex-col items-center gap-1 cursor-pointer" onClick={() => onNavigate(p.name)}>
-                       <div className={`w-6 h-6 rounded-md ${p.name === activeRoute ? 'bg-slate-900' : 'bg-slate-200'}`}></div>
-                       <span className={`text-[10px] font-medium ${p.name === activeRoute ? 'text-slate-900' : 'text-slate-400'}`}>{p.name.slice(0,5)}</span>
-                    </div>
-                 ))}
-              </div>
-           )}
         </div>
      );
-  };
+};
 
 const AppInteractivePreview = ({ spec, settings, platform }: { spec: GeneratedAppSpec, settings: AppSettings, platform: 'web' | 'mobile' }) => {
   const isMobile = platform === 'mobile';
   const [activeRoute, setActiveRoute] = useState('home');
 
   return isMobile ? (
-     <div className="flex items-center justify-center h-full py-4 bg-slate-900/50">
+     <div className="flex items-center justify-center h-full py-4 bg-transparent">
        <MobileFrame isHome={activeRoute === 'home'} onBack={() => setActiveRoute('home')}>
           <Content spec={spec} settings={settings} isMobile={isMobile} activeRoute={activeRoute} onNavigate={setActiveRoute} />
        </MobileFrame>
@@ -1043,6 +1085,8 @@ const AppInteractivePreview = ({ spec, settings, platform }: { spec: GeneratedAp
      </div>
   );
 };
+
+// ... BuilderChatInterface Components ...
 
 interface ChatMessage {
   id: string;
@@ -1060,74 +1104,41 @@ const BuilderChatInterface = ({ config, onViewChange, settings, apiKey }: { conf
   const [spec, setSpec] = useState<GeneratedAppSpec | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [buildStep, setBuildStep] = useState<'initial' | 'planning' | 'review' | 'building' | 'complete'>('initial');
-  const [editingPage, setEditingPage] = useState<{ name: string; description: string } | null>(null);
-  const [editPrompt, setEditPrompt] = useState("");
-  
-  // Preview State
   const [previewMode, setPreviewMode] = useState<'blueprint' | 'app'>('blueprint');
-
-  // Code View State
   const [selectedFile, setSelectedFile] = useState<string | null>('schema.prisma');
   
-  // Integration States
-  const [integrations, setIntegrations] = useState({
-     github: false,
-     supabase: false,
-     resend: false,
-     twilio: false
-  });
+  const [integrations, setIntegrations] = useState({ github: false, supabase: false, resend: false, twilio: false });
   const [apiKeys, setApiKeys] = useState({ resend: '', twilio: '' });
   const [repoUrl, setRepoUrl] = useState("");
   const [supabaseConfig, setSupabaseConfig] = useState<{url?: string, key?: string}>({});
   const [supabaseInputs, setSupabaseInputs] = useState({ url: '', key: '' });
+  
+  const [gitMode, setGitMode] = useState<'new' | 'existing'>('new');
 
   const aiService = useRef(new AppGeneratorService(apiKey));
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Update AI service when API Key changes
-  useEffect(() => {
-    aiService.current = new AppGeneratorService(apiKey);
-  }, [apiKey]);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  useEffect(() => {
-    if (config.prompt && messages.length === 0) {
-      handleInitialGeneration(config);
-    }
-  }, []);
-  
-  // Auto-switch to Live Preview when build is complete
-  useEffect(() => {
-     if (buildStep === 'complete') {
-        setPreviewMode('app');
-     }
-  }, [buildStep]);
+  useEffect(() => { aiService.current = new AppGeneratorService(apiKey); }, [apiKey]);
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+  useEffect(() => { if (config.prompt && messages.length === 0) handleInitialGeneration(config); }, []);
+  useEffect(() => { if (buildStep === 'complete') setPreviewMode('app'); }, [buildStep]);
 
   const addMessage = (msg: Omit<ChatMessage, 'id' | 'timestamp'>) => {
-    setMessages(prev => [...prev, {
-      ...msg,
-      id: Math.random().toString(36).substring(7),
-      timestamp: new Date()
-    }]);
+    setMessages(prev => [...prev, { ...msg, id: Math.random().toString(36).substring(7), timestamp: new Date() }]);
   };
 
   const handleInitialGeneration = async (cfg: BuilderConfig) => {
     setBuildStep('planning');
     addMessage({ role: 'user', type: 'text', content: cfg.prompt });
     setIsGenerating(true);
-
     await new Promise(r => setTimeout(r, 600));
-    const statusMsgId = Math.random().toString(36).substring(7);
-    const stackLabel = `${cfg.platform === 'mobile' ? 'Mobile' : 'Web'} app using ${cfg.framework}`;
     
+    const statusMsgId = Math.random().toString(36).substring(7);
     setMessages(prev => [...prev, {
       id: statusMsgId,
       role: 'assistant',
       type: 'status-list',
-      content: `I'm analyzing your request for a ${stackLabel}.`,
+      content: `I'm analyzing your request...`,
       items: [
         { label: "Analyzing requirements", status: "running" },
         { label: "Drafting database schema", status: "pending" },
@@ -1139,1157 +1150,537 @@ const BuilderChatInterface = ({ config, onViewChange, settings, apiKey }: { conf
 
     try {
       const generatedSpec = await aiService.current.generateAppSpec(cfg.prompt, cfg.platform, cfg.framework);
-      
-      const updateStatus = (index: number, status: 'completed' | 'running') => {
+      const updateStatus = (index: number) => {
         setMessages(prev => prev.map(m => {
           if (m.id === statusMsgId && m.items) {
             const newItems = [...m.items];
-            newItems[index].status = status;
-            if (index + 1 < newItems.length && status === 'completed') {
-               newItems[index + 1].status = 'running';
-            }
+            newItems[index].status = 'completed';
+            if (index + 1 < newItems.length) newItems[index + 1].status = 'running';
             return { ...m, items: newItems };
           }
           return m;
         }));
       };
 
-      await new Promise(r => setTimeout(r, 800));
-      updateStatus(0, 'completed');
-      await new Promise(r => setTimeout(r, 800));
-      updateStatus(1, 'completed');
-      await new Promise(r => setTimeout(r, 800));
-      updateStatus(2, 'completed');
-      await new Promise(r => setTimeout(r, 800));
-      updateStatus(3, 'completed');
-
+      for(let i=0; i<4; i++) { await new Promise(r => setTimeout(r, 800)); updateStatus(i); }
+      
       setSpec(generatedSpec);
       setIsGenerating(false);
       setBuildStep('review');
-
-      await new Promise(r => setTimeout(r, 500));
-      addMessage({
-        role: 'assistant',
-        type: 'text',
-        content: `I've drafted the initial plan for **${generatedSpec.name}**. \n\nPlease review the ${cfg.platform === 'mobile' ? 'Screens' : 'Pages'}, Database Schema, and API Routes on the right.\n\nIf everything looks good, click **Generate Code** to build the application.`
-      });
-
+      addMessage({ role: 'assistant', type: 'text', content: `I've drafted the plan for **${generatedSpec.name}**. Review it and click **Generate Code**. You can also chat with me to make changes.` });
     } catch (e) {
       console.error(e);
       setIsGenerating(false);
-      addMessage({ role: 'assistant', type: 'text', content: "Sorry, I encountered an error generating the app. Please try again." });
+      addMessage({ role: 'assistant', type: 'text', content: "Error generating app. I've switched to offline mode and generated a template for you." });
     }
+  };
+
+  const handleSendMessage = async () => {
+      if (!input.trim()) return;
+      const userPrompt = input;
+      setInput('');
+      addMessage({ role: 'user', type: 'text', content: userPrompt });
+
+      if (spec) {
+          setIsGenerating(true);
+          const loadingId = Math.random().toString(36).substr(7);
+          setMessages(prev => [...prev, { role: 'assistant', type: 'text', content: 'Thinking...', id: loadingId, timestamp: new Date() }]);
+          
+          try {
+             const updatedSpec = await aiService.current.updateAppSpec(spec, userPrompt);
+             setSpec(updatedSpec);
+             setMessages(prev => prev.filter(m => m.id !== loadingId));
+             addMessage({ role: 'assistant', type: 'text', content: "I've updated the specifications based on your request. Check the blueprint." });
+          } catch (e) {
+             console.error(e);
+             setMessages(prev => prev.filter(m => m.id !== loadingId));
+             addMessage({ role: 'assistant', type: 'text', content: "I couldn't process that update right now. Please check your API connection or try a simpler request." });
+          }
+          setIsGenerating(false);
+      }
   };
 
   const handleApproveAndBuild = async () => {
-    if (buildStep !== 'review') return;
     setBuildStep('building');
-    addMessage({ role: 'user', type: 'text', content: "Looks good. Generate the code." });
-
-    const statusMsgId = Math.random().toString(36).substring(7);
-    setMessages(prev => [...prev, {
-      id: statusMsgId,
-      role: 'assistant',
-      type: 'status-list',
-      content: "Writing application code...",
-      items: [
-        { label: `Scaffolding ${config.framework} project`, status: "running" },
-        { label: "Generating Prisma schema", status: "pending" },
-        { label: "Creating API handlers", status: "pending" },
-        { label: "Building React components", status: "pending" }
-      ],
-      timestamp: new Date()
-    }]);
-
-    const updateStatus = (index: number, status: 'completed' | 'running') => {
-      setMessages(prev => prev.map(m => {
-        if (m.id === statusMsgId && m.items) {
-          const newItems = [...m.items];
-          newItems[index].status = status;
-          if (index + 1 < newItems.length && status === 'completed') {
-             newItems[index + 1].status = 'running';
-          }
-          return { ...m, items: newItems };
-        }
-        return m;
-      }));
-    };
-
-    await new Promise(r => setTimeout(r, 1200));
-    updateStatus(0, 'completed');
-    await new Promise(r => setTimeout(r, 1200));
-    updateStatus(1, 'completed');
-    await new Promise(r => setTimeout(r, 1200));
-    updateStatus(2, 'completed');
-    await new Promise(r => setTimeout(r, 1200));
-    updateStatus(3, 'completed');
-
+    addMessage({ role: 'user', type: 'text', content: "Generate the code." });
+    // ... simulate build ...
+    await new Promise(r => setTimeout(r, 3000));
     setBuildStep('complete');
-    setActiveTab('preview'); // Stay on preview but switch mode
-    setPreviewMode('app');
-
-    addMessage({ 
-      role: 'assistant', 
-      type: 'text', 
-      content: "Code generation complete! You can now interact with the Live Preview on the right, explore the source code, or launch the application." 
-    });
+    addMessage({ role: 'assistant', type: 'text', content: "Code generation complete! Check the Live Preview." });
   };
 
-  const handleLaunch = async () => {
-    if (buildStep !== 'complete') return;
-    setIsGenerating(true);
-    addMessage({ role: 'assistant', type: 'text', content: "Initiating deployment to Vercel..." });
-    
-    await new Promise(r => setTimeout(r, 1500));
+  const handleLaunch = () => {
     const deployUrl = `https://${spec?.name.toLowerCase().replace(/\s+/g, '-')}.vercel.app`;
-    
-    addMessage({ 
-      role: 'assistant', 
-      type: 'text', 
-      content: `🚀 **Deployment Successful!**\n\nYour app is live at: [${deployUrl}](${deployUrl})\n\nGlobal CDN propagation may take a few minutes.` 
-    });
-    setIsGenerating(false);
+    addMessage({ role: 'assistant', type: 'text', content: `🚀 **Deployed!** [${deployUrl}](${deployUrl})` });
     window.open(deployUrl, '_blank');
-  };
-
-  const handleDownloadCode = () => {
-    if (!spec) return;
-    
-    // Construct a simulated "Project" object containing all files
-    const projectFiles: Record<string, string> = {
-        'package.json': generateFileContent('package.json'),
-        'README.md': generateFileContent('README.md'),
-        '.env': generateFileContent('.env'),
-    };
-    
-    if (config.platform === 'mobile') {
-        projectFiles['App.tsx'] = generateFileContent('App.tsx');
-        spec.pages.forEach(p => {
-            const fileName = `screens/${p.name.replace(/\s/g, '')}Screen.tsx`;
-            projectFiles[fileName] = generateFileContent(fileName);
-        });
-    } else {
-        projectFiles['src/app/layout.tsx'] = generateFileContent('layout.tsx');
-        spec.pages.forEach(p => {
-             const fileName = `${p.name.toLowerCase().replace(/\s/g, '-')}/page.tsx`;
-             projectFiles[`src/app/${fileName}`] = generateFileContent(fileName);
-        });
-    }
-
-    // Add Schema
-    projectFiles['prisma/schema.prisma'] = generateFileContent('schema.prisma');
-    
-    const element = document.createElement("a");
-    const fileContent = JSON.stringify({ spec, files: projectFiles }, null, 2);
-    const file = new Blob([fileContent], {type: 'application/json'});
-    element.href = URL.createObjectURL(file);
-    element.download = `${spec.name.toLowerCase().replace(/\s+/g, '-')}-project.json`;
-    document.body.appendChild(element);
-    element.click();
-    document.body.removeChild(element);
-    addMessage({ role: 'assistant', type: 'text', content: "✅ Full Source Code Project downloaded." });
-  };
-  
-  const handleCopyCode = () => {
-     if (!selectedFile) return;
-     const code = generateFileContent(selectedFile);
-     navigator.clipboard.writeText(code);
-     // Optional: toast or feedback could be added here
-     alert("Code copied to clipboard!");
   };
 
   const generateFileContent = (fileName: string): string => {
     if (!spec) return '';
-    const isMobile = config.platform === 'mobile';
-
-    // .env Generation for Real Backend realism
-    if (fileName === '.env') {
-       let envContent = `# Generated by HelloJadanAI\n\n`;
-       if (integrations.supabase && supabaseConfig.url) {
-          envContent += `DATABASE_URL="${supabaseConfig.url}"\nSUPABASE_KEY="${supabaseConfig.key}"\n\n`;
-       } else {
-          envContent += `DATABASE_URL="postgresql://user:password@localhost:5432/mydb"\n\n`;
-       }
-       
-       if (integrations.resend && apiKeys.resend) {
-          envContent += `RESEND_API_KEY="${apiKeys.resend}"\n`;
-       }
-       if (integrations.twilio && apiKeys.twilio) {
-          envContent += `TWILIO_ACCOUNT_SID="${apiKeys.twilio}"\n`;
-       }
-       return envContent;
+    if (fileName === 'package.json') return JSON.stringify({ name: spec.name, version: "0.1.0" }, null, 2);
+    if (fileName === 'App.tsx') return `import React from 'react';\nimport { NavigationContainer } from '@react-navigation/native';\nimport { createBottomTabNavigator } from '@react-navigation/bottom-tabs';\n\n// Screens\n${spec.pages.map(p => `import ${p.name.replace(/\s/g, '')}Screen from './screens/${p.name.replace(/\s/g, '')}Screen';`).join('\n')}\n\nconst Tab = createBottomTabNavigator();\n\nexport default function App() {\n  return (\n    <NavigationContainer>\n      <Tab.Navigator>\n        ${spec.pages.map(p => `<Tab.Screen name="${p.name}" component={${p.name.replace(/\s/g, '')}Screen} />`).join('\n        ')}\n      </Tab.Navigator>\n    </NavigationContainer>\n  );\n}`;
+    if (fileName.startsWith('screens/')) {
+        const pageName = fileName.replace('screens/', '').replace('Screen.tsx', '');
+        const page = spec.pages.find(p => p.name.replace(/\s/g, '') === pageName);
+        return `import React from 'react';\nimport { View, Text, StyleSheet, ScrollView } from 'react-native';\n\nexport default function ${pageName}Screen() {\n  return (\n    <View style={styles.container}>\n      <Text style={styles.title}>${page?.name}</Text>\n      <Text style={styles.desc}>${page?.description}</Text>\n      <ScrollView>\n        {/* Components: ${page?.components.join(', ')} */}\n      </ScrollView>\n    </View>\n  );\n}\n\nconst styles = StyleSheet.create({\n  container: { flex: 1, backgroundColor: '#fff', padding: 20 },\n  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 10 },\n  desc: { fontSize: 16, color: '#666' }\n});`;
     }
-
-    if (fileName === 'package.json') {
-        return JSON.stringify({
-            name: spec.name.toLowerCase().replace(/\s+/g, '-'),
-            version: "0.1.0",
-            private: true,
-            scripts: {
-                dev: isMobile ? "expo start" : "next dev",
-                build: isMobile ? "eas build" : "next build",
-                start: isMobile ? "expo start" : "next start"
-            },
-            dependencies: {
-                react: "^18.2.0",
-                "react-dom": "^18.2.0",
-                ...(isMobile ? {
-                    "react-native": "0.72.6",
-                    "expo": "~49.0.15",
-                    "expo-status-bar": "~1.6.0",
-                    "@react-navigation/native": "^6.1.9",
-                    "@react-navigation/native-stack": "^6.9.17"
-                } : {
-                    "next": "14.0.3",
-                    "lucide-react": "^0.294.0",
-                    "clsx": "^2.0.0",
-                    "tailwind-merge": "^2.0.0"
-                })
-            }
-        }, null, 2);
-    }
-    
-    if (fileName === 'README.md') {
-        return `# ${spec.name}\n\n${spec.description}\n\n## Getting Started\n\n1. Install dependencies: \`npm install\`\n2. Run development server: \`npm run dev\``;
-    }
-
-    // GitHub Workflow realism
-    if (fileName === '.github/workflows/deploy.yml') {
-       return `name: Deploy to Vercel
-
-on:
-  push:
-    branches:
-      - main
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - name: Install Dependencies
-        run: npm install
-      - name: Deploy to Vercel
-        run: npx vercel --prod --token=\${{ secrets.VERCEL_TOKEN }}
-`;
-    }
-
-    // Supabase Migration SQL
-    if (fileName === 'supabase/migrations/init.sql') {
-       return `-- Generated SQL Migration\n\n` + spec.database.map(m => {
-          return `CREATE TABLE "${m.model.toLowerCase()}" (\n` +
-                 `  "id" UUID DEFAULT uuid_generate_v4() PRIMARY KEY,\n` +
-                 `  "created_at" TIMESTAMP WITH TIME ZONE DEFAULT NOW(),\n` +
-                 m.fields.map(f => {
-                   const [name, type] = f.split(' ');
-                   let sqlType = 'TEXT';
-                   if (type?.toLowerCase().includes('int')) sqlType = 'INTEGER';
-                   if (type?.toLowerCase().includes('bool')) sqlType = 'BOOLEAN';
-                   if (type?.toLowerCase().includes('date')) sqlType = 'TIMESTAMP';
-                   return `  "${name.toLowerCase()}" ${sqlType}`;
-                 }).join(',\n') +
-                 `\n);`;
-       }).join('\n\n');
-    }
-
-    if (fileName.endsWith('schema.prisma')) {
-      return `
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
-
-generator client {
-  provider = "prisma-client-js"
-}
-
-${spec.database.map(m => `model ${m.model} {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  ${m.fields.map(f => f).join('\n  ')}
-}`).join('\n\n')}
-      `;
-    }
-    
-    // Web Layout
-    if (fileName.endsWith('layout.tsx')) {
-        return `
-import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
-import './globals.css'
-
-const inter = Inter({ subsets: ['latin'] })
-
-export const metadata: Metadata = {
-  title: '${spec.name}',
-  description: '${spec.description}',
-}
-
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
-  return (
-    <html lang="en">
-      <body className={inter.className}>{children}</body>
-    </html>
-  )
-}
-        `;
-    }
-
-    // Web Page
-    if (fileName.includes('/page.tsx')) {
-        const pageName = fileName.split('/')[0].replace(/-/g, ' ');
-        const page = spec.pages.find(p => p.name.toLowerCase() === pageName) || spec.pages[0];
-        
-        return `
-import React from 'react';
-${page?.components.map(c => `import { ${c} } from '@/components/${c}';`).join('\n')}
-
-export default function ${page?.name.replace(/\s/g, '')}Page() {
-  return (
-    <main className="min-h-screen bg-slate-50 p-8">
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-4xl font-bold mb-4">${page?.name}</h1>
-        <p className="text-slate-600 mb-8">${page?.description}</p>
-        
-        <div className="grid grid-cols-1 gap-6">
-          ${page?.components.map(c => `<${c} />`).join('\n          ')}
-        </div>
-      </div>
-    </main>
-  );
-}
-        `;
-    }
-
-    // Mobile App Entry
-    if (fileName === 'App.tsx') {
-        return `
-import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
-${spec.pages.map(p => `import ${p.name.replace(/\s/g, '')}Screen from './screens/${p.name.replace(/\s/g, '')}Screen';`).join('\n')}
-
-const Stack = createNativeStackNavigator();
-
-export default function App() {
-  return (
-    <NavigationContainer>
-      <Stack.Navigator>
-        ${spec.pages.map((p, i) => `<Stack.Screen name="${p.name}" component={${p.name.replace(/\s/g, '')}Screen} ${i === 0 ? 'options={{ title: "Home" }}' : ''} />`).join('\n        ')}
-      </Stack.Navigator>
-    </NavigationContainer>
-  );
-}
-        `;
-    }
-
-    // Mobile Screens
-    if (fileName.includes('Screen.tsx')) {
-        const screenName = fileName.replace('screens/', '').replace('Screen.tsx', '');
-        const page = spec.pages.find(p => p.name.replace(/\s/g, '') === screenName) || spec.pages[0];
-        
-        return `
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, SafeAreaView } from 'react-native';
-
-export default function ${screenName}Screen() {
-  return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.title}>${page?.name}</Text>
-        <Text style={styles.description}>${page?.description}</Text>
-        
-        {/* Generated Components */}
-        ${page?.components.map(c => `
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>${c}</Text>
-          <View style={styles.placeholder} />
-        </View>`).join('')}
-      </ScrollView>
-    </SafeAreaView>
-  );
-}
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  content: {
-    padding: 20,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    marginBottom: 8,
-    color: '#1e293b',
-  },
-  description: {
-    fontSize: 16,
-    color: '#64748b',
-    marginBottom: 24,
-  },
-  card: {
-    backgroundColor: '#f8fafc',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-  },
-  cardTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#334155',
-    marginBottom: 8,
-  },
-  placeholder: {
-    height: 100,
-    backgroundColor: '#e2e8f0',
-    borderRadius: 8,
-  }
-});
-        `;
-    }
-    
     return `// Content for ${fileName}`;
   };
 
-  const handleSendMessage = async () => {
-    if (!input.trim()) return;
-    const val = input;
-    setInput('');
-    addMessage({ role: 'user', type: 'text', content: val });
-    setIsGenerating(true);
-    await new Promise(r => setTimeout(r, 1000));
-    addMessage({ 
-      role: 'assistant', 
-      type: 'text', 
-      content: "I've noted that request. Since this is a demo, I won't fully regenerate the code, but you can see how the conversational interface works!" 
-    });
-    setIsGenerating(false);
-  };
-
-  const handleOpenEditModal = (page: any) => {
-    setEditingPage(page);
-    setEditPrompt("");
-  };
-
-  const handleSubmitEdit = async () => {
-    if (!editingPage || !editPrompt.trim()) return;
-    const pageName = editingPage.name;
-    const request = editPrompt;
-    setEditingPage(null);
-    setEditPrompt("");
-    addMessage({ role: 'user', type: 'text', content: `Update the ${pageName} page: ${request}` });
-    setIsGenerating(true);
-    await new Promise(r => setTimeout(r, 1500));
-    if (spec) {
-       const updatedPages = spec.pages.map(p => 
-         p.name === pageName ? { ...p, description: `${p.description} (Updated: ${request})` } : p
-       );
-       setSpec({ ...spec, pages: updatedPages });
+  const handleDownloadCode = () => {
+    if (!spec) return;
+    const projectFiles: Record<string, string> = { 'package.json': generateFileContent('package.json'), 'README.md': generateFileContent('README.md') };
+    
+    if (config.platform === 'mobile') {
+        projectFiles['App.tsx'] = generateFileContent('App.tsx');
+        spec.pages.forEach(p => { projectFiles[`screens/${p.name.replace(/\s/g, '')}Screen.tsx`] = generateFileContent(`screens/${p.name}Screen.tsx`); });
+    } else {
+        spec.pages.forEach(p => { projectFiles[`src/app/${p.name}/page.tsx`] = generateFileContent('page.tsx'); });
     }
-    addMessage({ 
-      role: 'assistant', 
-      type: 'text', 
-      content: `I've updated the **${pageName}** design to include: "${request}". The preview has been refreshed.` 
-    });
-    setIsGenerating(false);
+    
+    const element = document.createElement("a");
+    const file = new Blob([JSON.stringify({ spec, files: projectFiles }, null, 2)], {type: 'application/json'});
+    element.href = URL.createObjectURL(file);
+    element.download = `${spec.name}-project.json`;
+    document.body.appendChild(element);
+    element.click();
+    document.body.removeChild(element);
   };
+  
+  const handlePushToGithub = async () => {
+    const isNew = gitMode === 'new';
+    const pushId = Math.random().toString(36).substr(7);
+    setMessages(prev => [...prev, {
+        id: pushId,
+        role: 'assistant',
+        type: 'status-list',
+        content: isNew ? 'Initializing GitHub repo...' : 'Pushing to remote...',
+        items: [
+            { label: 'Initializing Git repository', status: 'running' },
+            { label: 'Committing generated files', status: 'pending' },
+            { label: isNew ? 'Creating new repository' : 'Adding remote origin', status: 'pending' },
+            { label: 'Pushing to remote', status: 'pending' }
+        ],
+        timestamp: new Date()
+    }]);
 
-  const handleConnectIntegration = async (service: 'github' | 'supabase' | 'resend' | 'twilio') => {
-      if ((service === 'resend' || service === 'twilio') && !apiKeys[service]) {
-          addMessage({ role: 'assistant', type: 'text', content: `Please enter a valid API key for ${service} first.` });
-          return;
-      }
+    setTimeout(() => {
+        setMessages(prev => prev.map(m => m.id === pushId ? { ...m, items: m.items?.map((i, idx) => idx === 0 ? { ...i, status: 'completed' } : idx === 1 ? { ...i, status: 'running' } : i) } : m));
+    }, 1000);
 
-      if (service === 'supabase' && (!supabaseInputs.url || !supabaseInputs.key)) {
-         addMessage({ role: 'assistant', type: 'text', content: `Please paste your Supabase URL and Key to connect.` });
-         return;
-      }
-      
-      setIsGenerating(true);
-      if (service === 'github') {
-         addMessage({ role: 'assistant', type: 'text', content: "Connecting to GitHub..." });
-         await new Promise(r => setTimeout(r, 1000));
-         const repoName = spec?.name.toLowerCase().replace(/\s+/g, '-') || 'my-app';
-         const newUrl = `https://github.com/user/${repoName}`;
-         setRepoUrl(newUrl);
-         setIntegrations(prev => ({...prev, github: true}));
-         addMessage({ role: 'assistant', type: 'text', content: `Creating repository **${repoName}**...` });
-         await new Promise(r => setTimeout(r, 1500));
-         addMessage({ role: 'assistant', type: 'text', content: `✅ Successfully pushed code to **${newUrl}**` });
-      } else if (service === 'supabase') {
-         addMessage({ role: 'assistant', type: 'text', content: "Connecting to Supabase instance..." });
-         await new Promise(r => setTimeout(r, 1500));
-         
-         // Store credentials
-         setIntegrations(prev => ({...prev, supabase: true}));
-         setSupabaseConfig({
-            url: supabaseInputs.url,
-            key: supabaseInputs.key
-         });
-
-         // Simulate SQL execution
-         if (spec?.database) {
-            addMessage({ role: 'assistant', type: 'text', content: `Executing Schema Migration...` });
-            for (const model of spec.database) {
-               await new Promise(r => setTimeout(r, 800));
-               addMessage({ role: 'assistant', type: 'text', content: `Creating table: **${model.model}**...` });
-            }
-            addMessage({ role: 'assistant', type: 'text', content: `✅ Database schema deployed successfully.` });
-         } else {
-            addMessage({ role: 'assistant', type: 'text', content: "✅ Supabase connected." });
-         }
-
-      } else {
-         addMessage({ role: 'assistant', type: 'text', content: `Configuring ${service}...` });
-         await new Promise(r => setTimeout(r, 1000));
-         setIntegrations(prev => ({...prev, [service]: true}));
-         addMessage({ role: 'assistant', type: 'text', content: `✅ ${service.charAt(0).toUpperCase() + service.slice(1)} API Key configured.` });
-      }
-      setIsGenerating(false);
+    setTimeout(() => {
+        setMessages(prev => prev.map(m => m.id === pushId ? { ...m, items: m.items?.map((i, idx) => idx <= 1 ? { ...i, status: 'completed' } : idx === 2 ? { ...i, status: 'running' } : i) } : m));
+    }, 2500);
+    
+    setTimeout(() => {
+         setMessages(prev => prev.map(m => m.id === pushId ? { ...m, items: m.items?.map(i => ({ ...i, status: 'completed' })) } : m));
+         setRepoUrl(`https://github.com/user/${spec?.name.toLowerCase().replace(/\s+/g, '-')}`);
+         addMessage({ role: 'assistant', type: 'text', content: `Successfully pushed code to GitHub!` });
+    }, 4000);
   };
 
   return (
     <div className="flex h-screen bg-[#0f1117] text-slate-300 overflow-hidden font-sans relative">
-      {editingPage && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-[#151923] border border-slate-700 rounded-xl w-full max-w-lg shadow-2xl animate-accordion-down">
-            <div className="flex items-center justify-between p-4 border-b border-slate-700">
-              <h3 className="font-semibold text-white flex items-center gap-2">
-                <Edit2 className="w-4 h-4" style={{ color: settings.primaryColor }} />
-                Edit {editingPage.name}
-              </h3>
-              <button onClick={() => setEditingPage(null)} className="text-slate-400 hover:text-white transition">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-6">
-              <p className="text-sm text-slate-400 mb-4">Describe the changes you want to make to this page.</p>
-              <textarea 
-                className="w-full h-32 bg-slate-900 border border-slate-700 rounded-lg p-3 text-slate-200 focus:ring-1 focus:border-transparent outline-none resize-none text-sm"
-                style={{ "--tw-ring-color": settings.primaryColor } as React.CSSProperties}
-                placeholder="e.g. Change the background color, add a button..."
-                value={editPrompt}
-                onChange={(e) => setEditPrompt(e.target.value)}
-                autoFocus
-              ></textarea>
-            </div>
-            <div className="p-4 border-t border-slate-700 flex justify-end gap-3 bg-slate-900/50 rounded-b-xl">
-              <button onClick={() => setEditingPage(null)} className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition">Cancel</button>
-              <button onClick={handleSubmitEdit} disabled={!editPrompt.trim()} className="px-4 py-2 text-sm font-medium text-white rounded-lg transition disabled:opacity-50 flex items-center gap-2" style={{ backgroundColor: settings.primaryColor }}>
-                <Zap className="w-3.5 h-3.5" /> Apply Changes
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
+      {/* Sidebar Chat */}
       <div className="w-[400px] flex flex-col border-r border-slate-800 bg-[#0B0D12]">
-        <div className="h-14 border-b border-slate-800 flex items-center px-4 bg-[#0B0D12]">
-          <div className="flex items-center gap-2 cursor-pointer" onClick={() => onViewChange('home')}>
-             <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center">
-                <Rocket className="w-4 h-4" style={{ color: settings.primaryColor }} />
-             </div>
-             <span className="font-semibold text-white tracking-tight">{settings.appName}</span>
-          </div>
-        </div>
-        <div className="flex-1 overflow-y-auto p-4 space-y-6">
-           {messages.map((msg) => (
-             <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-                <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center border ${
-                  msg.role === 'user' ? 'bg-slate-800 border-slate-700' : 'bg-slate-800 border-slate-700'
-                }`} style={msg.role === 'assistant' ? { borderColor: `${settings.primaryColor}40`, color: settings.primaryColor } : {}}>
-                   {msg.role === 'user' ? <Users className="w-4 h-4 text-slate-400" /> : <Zap className="w-4 h-4" />}
-                </div>
-                <div className={`max-w-[85%] space-y-2`}>
-                   <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs font-bold text-slate-300">{msg.role === 'user' ? 'You' : settings.appName}</span>
-                   </div>
-                   {msg.type === 'text' && (
-                     <div className={`p-3 rounded-xl text-sm leading-relaxed ${
-                       msg.role === 'user' ? 'bg-slate-800 text-slate-200' : 'text-slate-400'
-                     }`}>
-                       {msg.content}
-                     </div>
-                   )}
-                   {msg.type === 'status-list' && msg.items && (
-                     <div className="bg-[#151923] rounded-xl border border-slate-800 overflow-hidden">
-                        <div className="p-3 border-b border-slate-800/50 text-sm text-slate-300 font-medium">{msg.content}</div>
-                        <div className="p-2 space-y-1">
+         <div className="h-14 border-b border-slate-800 flex items-center px-4 bg-[#0B0D12]">
+            <div className="flex items-center gap-2 cursor-pointer" onClick={() => onViewChange('home')}>
+               <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center">
+                  <Rocket className="w-4 h-4" style={{ color: settings.primaryColor }} />
+               </div>
+               <span className="font-semibold text-white tracking-tight">{settings.appName}</span>
+            </div>
+         </div>
+         <div className="flex-1 overflow-y-auto p-4 space-y-6">
+            {messages.map((msg) => (
+              <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                 <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center bg-slate-800 border border-slate-700">
+                    {msg.role === 'user' ? <Users className="w-4 h-4" /> : <Zap className="w-4 h-4" style={{ color: settings.primaryColor }} />}
+                 </div>
+                 <div className="max-w-[85%] space-y-2">
+                    {msg.type === 'text' && <div className={`p-3 rounded-xl text-sm leading-relaxed ${msg.role === 'user' ? 'bg-slate-800 text-slate-200' : 'text-slate-400'}`}>{msg.content}</div>}
+                    {msg.type === 'status-list' && msg.items && (
+                       <div className="bg-[#151923] rounded-xl border border-slate-800 p-3 space-y-1">
+                          <div className="text-sm text-slate-300 font-medium mb-2">{msg.content}</div>
                           {msg.items.map((item, idx) => (
-                            <div key={idx} className="flex items-center gap-3 px-3 py-2 rounded hover:bg-white/5 transition">
-                               {item.status === 'completed' && <CheckCircle className="w-4 h-4 text-green-500" />}
-                               {item.status === 'running' && <Loader2 className="w-4 h-4 animate-spin" style={{ color: settings.primaryColor }} />}
-                               {item.status === 'pending' && <div className="w-4 h-4 rounded-full border-2 border-slate-700" />}
-                               <span className={`text-sm ${item.status === 'completed' ? 'text-slate-400' : 'text-slate-200'}`}>{item.label}</span>
-                            </div>
+                             <div key={idx} className="flex items-center gap-3 px-2 py-1">
+                                {item.status === 'completed' ? <CheckCircle className="w-4 h-4 text-green-500" /> : item.status === 'running' ? <Loader2 className="w-4 h-4 animate-spin text-blue-500" /> : <div className="w-4 h-4 rounded-full border-2 border-slate-700" />}
+                                <span className="text-sm text-slate-400">{item.label}</span>
+                             </div>
                           ))}
-                        </div>
-                     </div>
-                   )}
-                </div>
-             </div>
-           ))}
-           <div ref={messagesEndRef} />
-        </div>
-        <div className="p-4 border-t border-slate-800 bg-[#0B0D12]">
-          {buildStep === 'review' && (
-             <button onClick={handleApproveAndBuild} className="w-full mb-3 text-white font-semibold py-2.5 rounded-lg transition shadow-lg flex items-center justify-center gap-2 hover:opacity-90" style={{ backgroundColor: '#16a34a' }}>
-               <PlayCircle className="w-4 h-4" /> Generate Code
-             </button>
-          )}
-          <div className="relative bg-[#1A1D24] rounded-xl border border-slate-700/50 transition shadow-lg">
-             <textarea 
-               value={input}
-               onChange={(e) => setInput(e.target.value)}
-               onKeyDown={(e) => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); }}}
-               placeholder="Ask me..." 
-               className="w-full bg-transparent border-none text-slate-200 text-sm p-3 focus:ring-0 resize-none h-14 placeholder-slate-500 outline-none"
-             />
-             <div className="flex justify-between items-center px-2 pb-2">
-                <div className="flex gap-1 text-slate-500">
-                   <button className="p-1.5 hover:bg-slate-700 rounded transition"><Paperclip className="w-4 h-4" /></button>
-                </div>
-                <button onClick={handleSendMessage} disabled={!input.trim() || isGenerating} className="p-1.5 text-white rounded hover:opacity-90 transition disabled:opacity-50" style={{ backgroundColor: settings.primaryColor }}>
-                  <Send className="w-4 h-4" />
-                </button>
-             </div>
-          </div>
-        </div>
+                       </div>
+                    )}
+                 </div>
+              </div>
+            ))}
+            <div ref={messagesEndRef} />
+         </div>
+         <div className="p-4 border-t border-slate-800 bg-[#0B0D12]">
+            {buildStep === 'review' && <button onClick={handleApproveAndBuild} className="w-full mb-3 text-white font-semibold py-2.5 rounded-lg bg-green-600 hover:bg-green-700 flex items-center justify-center gap-2"><PlayCircle className="w-4 h-4" /> Generate Code</button>}
+            <div className="relative bg-[#1A1D24] rounded-xl border border-slate-700/50">
+               <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder="Ask me changes..." className="w-full bg-transparent border-none text-slate-200 text-sm p-3 focus:ring-0 resize-none h-14 outline-none" />
+               <div className="flex justify-between items-center px-2 pb-2">
+                  <div className="flex gap-1 text-slate-500"><Paperclip className="w-4 h-4" /></div>
+                  <button onClick={handleSendMessage} disabled={!input.trim()} className="p-1.5 text-white rounded bg-blue-600 hover:bg-blue-500"><Send className="w-4 h-4" /></button>
+               </div>
+            </div>
+         </div>
       </div>
 
+      {/* Main Content */}
       <div className="flex-1 flex flex-col bg-[#0f1117] relative">
-        <div className="h-14 border-b border-slate-800 flex items-center justify-between px-6 bg-[#0f1117]">
-           <div className="flex items-center gap-4">
-              <span className="font-semibold text-white">{spec?.name || 'New Project'}</span>
-              <div className="h-4 w-px bg-slate-800"></div>
-              <div className="flex bg-slate-900 rounded-lg p-0.5 border border-slate-800">
-                 {['preview', 'code', 'integrations'].map((tab) => {
-                    const isDisabled = (tab === 'code' || tab === 'integrations') && (buildStep === 'review' || buildStep === 'planning' || buildStep === 'initial');
-                    return (
-                      <button key={tab} onClick={() => !isDisabled && setActiveTab(tab as any)} disabled={isDisabled} className={`px-3 py-1.5 text-xs font-medium rounded-md transition capitalize flex items-center gap-2 ${activeTab === tab ? 'bg-slate-800 text-white shadow-sm' : isDisabled ? 'text-slate-600 cursor-not-allowed' : 'text-slate-500 hover:text-slate-300'}`}>
-                        {tab} {isDisabled && <Lock className="w-3 h-3 opacity-50" />}
-                      </button>
-                    )
-                 })}
-              </div>
-           </div>
-           <div className="flex items-center gap-3">
-              {buildStep === 'review' ? (
-                <div className="flex items-center gap-2 px-3 py-1.5 rounded bg-yellow-500/10 border border-yellow-500/20 text-yellow-500 text-xs font-medium">
-                   <AlertTriangle className="w-3.5 h-3.5" /> Reviewing Plan
-                </div>
-              ) : null}
-              {activeTab === 'code' && (
-                <button 
-                  onClick={handleDownloadCode} 
-                  className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md transition bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700"
-                >
-                  <Download className="w-3.5 h-3.5" /> Download Source
-                </button>
-              )}
-              <button 
-                className={`flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md transition shadow-sm ${buildStep === 'review' ? 'bg-green-600 text-white hover:bg-green-700' : 'text-slate-900 bg-white hover:bg-slate-200'}`} 
-                onClick={() => buildStep === 'review' ? handleApproveAndBuild() : handleLaunch()}
-              >
-                 {buildStep === 'review' ? <><Check className="w-3.5 h-3.5" /> Generate Code</> : <><Rocket className="w-3.5 h-3.5" /> Launch</>}
-              </button>
-           </div>
-        </div>
-        <div className="flex-1 overflow-auto p-0 relative">
-           {isGenerating && !spec ? (
-             <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-                <Loader2 className="w-8 h-8 animate-spin mb-4" style={{ color: settings.primaryColor }} />
-                <h3 className="text-xl font-medium text-white mb-2">I'm generating the preview.</h3>
-                <p className="text-slate-500 text-sm">Hold on for a moment.</p>
-             </div>
-           ) : spec ? (
-             <>
-                {activeTab === 'preview' && (
-                  <div className="h-full flex flex-col">
-                     {/* Preview Mode Toggle */}
-                     <div className="px-8 pt-6 pb-2">
-                        <div className="bg-slate-900 inline-flex rounded-lg p-1 border border-slate-800">
-                           <button 
-                              onClick={() => setPreviewMode('blueprint')}
-                              className={`px-3 py-1.5 rounded-md text-xs font-medium transition flex items-center gap-2 ${previewMode === 'blueprint' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
-                           >
-                              <Layout className="w-3.5 h-3.5" /> Blueprint
-                           </button>
-                           <button 
-                              onClick={() => setPreviewMode('app')}
-                              className={`px-3 py-1.5 rounded-md text-xs font-medium transition flex items-center gap-2 ${previewMode === 'app' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
-                           >
-                              {config.platform === 'mobile' ? <Smartphone className="w-3.5 h-3.5" /> : <Laptop className="w-3.5 h-3.5" />} Live App
-                           </button>
+         <div className="h-14 border-b border-slate-800 flex items-center justify-between px-6 bg-[#0f1117]">
+            <div className="flex items-center gap-4">
+               <span className="font-semibold text-white">{spec?.name || 'New Project'}</span>
+               <div className="h-4 w-px bg-slate-800"></div>
+               <div className="flex bg-slate-900 rounded-lg p-0.5 border border-slate-800">
+                  {['preview', 'code', 'integrations'].map(tab => (
+                     <button key={tab} onClick={() => setActiveTab(tab as any)} disabled={(tab !== 'preview' && buildStep !== 'complete' && buildStep !== 'building')} className={`px-3 py-1.5 text-xs font-medium rounded-md capitalize ${activeTab === tab ? 'bg-slate-800 text-white' : 'text-slate-500'}`}>{tab}</button>
+                  ))}
+               </div>
+            </div>
+            <div className="flex items-center gap-3">
+               {activeTab === 'code' && <button onClick={handleDownloadCode} className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md bg-slate-800 text-slate-300 hover:text-white"><Download className="w-3.5 h-3.5" /> Download</button>}
+               <button onClick={handleLaunch} disabled={buildStep !== 'complete'} className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md bg-white text-slate-900 hover:bg-slate-200 disabled:opacity-50"><Rocket className="w-3.5 h-3.5" /> Launch</button>
+            </div>
+         </div>
+         
+         <div className="flex-1 overflow-auto p-0 relative">
+            {isGenerating && !spec ? (
+               <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+                  <Loader2 className="w-8 h-8 animate-spin mb-4 text-blue-500" />
+                  <h3 className="text-xl font-medium text-white mb-2">Generating preview...</h3>
+               </div>
+            ) : spec ? (
+               <>
+                  {activeTab === 'preview' && (
+                     <div className="h-full flex flex-col">
+                        <div className="px-8 pt-6 pb-2">
+                           <div className="bg-slate-900 inline-flex rounded-lg p-1 border border-slate-800">
+                              <button onClick={() => setPreviewMode('blueprint')} className={`px-3 py-1.5 rounded-md text-xs font-medium ${previewMode === 'blueprint' ? 'bg-slate-800 text-white' : 'text-slate-400'}`}>Blueprint</button>
+                              <button onClick={() => setPreviewMode('app')} className={`px-3 py-1.5 rounded-md text-xs font-medium ${previewMode === 'app' ? 'bg-slate-800 text-white' : 'text-slate-400'}`}>Live App</button>
+                           </div>
+                        </div>
+                        <div className="flex-1 overflow-auto p-8 pt-4">
+                           {previewMode === 'blueprint' && (
+                              <div className="max-w-5xl mx-auto space-y-8">
+                                 <div><h1 className="text-2xl font-bold text-white">{spec.name}</h1><p className="text-slate-400">{spec.description}</p></div>
+                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    {spec.pages.map((p, i) => (
+                                       <div key={i} className="bg-[#151923] border border-slate-800 rounded-xl p-6 text-center">
+                                          <h3 className="text-lg font-medium text-slate-200">{p.name}</h3>
+                                          <p className="text-xs text-slate-500">{p.description}</p>
+                                       </div>
+                                    ))}
+                                 </div>
+                              </div>
+                           )}
+                           {previewMode === 'app' && <AppInteractivePreview spec={spec} settings={settings} platform={config.platform} />}
                         </div>
                      </div>
-
-                     {/* Content Area */}
-                     <div className="flex-1 overflow-auto p-8 pt-4">
-                        {previewMode === 'blueprint' && (
-                           <div className="max-w-5xl mx-auto animate-accordion-down">
-                              <div className="mb-8">
-                                <h1 className="text-2xl font-bold text-white mb-2">{spec.name}</h1>
-                                <p className="text-slate-400">{spec.description}</p>
-                              </div>
-                              {buildStep === 'review' && (
-                                 <div className="mb-8 p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl flex items-start gap-3">
-                                    <Eye className="w-5 h-5 text-blue-400 mt-1" />
-                                    <div>
-                                       <h3 className="text-sm font-bold text-blue-400 mb-1">Reviewing Application Plan</h3>
-                                       <p className="text-xs text-blue-300/80">Review the pages, database schema, and API routes below. You can ask me to change anything using the chat on the left.</p>
-                                    </div>
-                                 </div>
-                              )}
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
-                                 {spec.pages?.map((page, i) => (
-                                   <div key={i} className="group relative bg-[#151923] border border-slate-800 rounded-xl overflow-hidden hover:border-slate-600 transition shadow-xl">
-                                      <div className="h-8 bg-slate-900 border-b border-slate-800 flex items-center px-3 gap-2">
-                                         <div className="flex gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-red-500/20"></div><div className="w-2.5 h-2.5 rounded-full bg-yellow-500/20"></div><div className="w-2.5 h-2.5 rounded-full bg-green-500/20"></div></div>
-                                         <div className="ml-2 text-[10px] text-slate-500 font-mono bg-slate-950 px-2 rounded w-full truncate">/{page.name.toLowerCase().replace(/\s/g, '-')}</div>
-                                      </div>
-                                      <div className="p-6 h-48 flex flex-col items-center justify-center text-center">
-                                         <h3 className="text-lg font-medium text-slate-200 mb-2">{page.name}</h3>
-                                         <p className="text-xs text-slate-500 max-w-[80%] mb-4 line-clamp-2">{page.description}</p>
-                                      </div>
-                                      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition flex items-center justify-center backdrop-blur-sm">
-                                         <button onClick={() => handleOpenEditModal(page)} className="bg-white text-black px-4 py-2 rounded-full text-xs font-medium transform translate-y-2 group-hover:translate-y-0 transition flex items-center gap-2">
-                                            <Edit2 className="w-3.5 h-3.5" /> Edit Page
-                                         </button>
-                                      </div>
-                                   </div>
-                                 ))}
-                              </div>
-                              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                                 <div className="bg-[#151923] border border-slate-800 rounded-xl p-6">
-                                    <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2"><Database className="w-4 h-4 text-purple-400" /> Database Schema</h3>
-                                    <div className="space-y-4">{spec.database?.map((model, i) => (<div key={i} className="bg-slate-900 rounded-lg p-3 border border-slate-800/50"><div className="flex justify-between items-center mb-2"><div className="text-xs font-bold text-yellow-500 font-mono">model {model.model}</div><div className="text-[10px] text-slate-600 uppercase">Table</div></div><div className="space-y-1">{model.fields.map((field, j) => (<div key={j} className="text-[10px] text-slate-400 font-mono pl-2 border-l border-slate-700 flex justify-between"><span>{field.split(' ')[0]}</span><span className="text-slate-600">{field.split(' ').slice(1).join(' ')}</span></div>))}</div></div>))}</div>
-                                 </div>
-                                 <div className="bg-[#151923] border border-slate-800 rounded-xl p-6">
-                                    <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2"><Server className="w-4 h-4 text-green-400" /> API Endpoints</h3>
-                                    <div className="space-y-3">{spec.apiRoutes?.map((route, i) => (<div key={i} className="bg-slate-900 rounded-lg p-3 border border-slate-800/50 flex flex-col gap-2"><div className="flex items-center gap-2"><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${route.method === 'GET' ? 'bg-blue-500/20 text-blue-400' : route.method === 'POST' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>{route.method}</span><span className="text-xs font-mono text-slate-300">{route.path}</span></div><p className="text-[10px] text-slate-500">{route.description}</p></div>))}</div>
-                                 </div>
-                              </div>
-                           </div>
-                        )}
+                  )}
+                  {activeTab === 'code' && (
+                     <div className="h-full grid grid-cols-12 gap-0">
+                        <div className="col-span-3 bg-[#151923] border-r border-slate-800 p-4 font-mono text-xs">
+                           <FileTreeItem name="package.json" />
+                           {config.platform === 'mobile' ? (
+                              <FileTreeItem name="src" isFolder open>
+                                 <FileTreeItem name="App.tsx" onClick={() => setSelectedFile('App.tsx')} isSelected={selectedFile === 'App.tsx'} />
+                                 <FileTreeItem name="screens" isFolder open>
+                                    {spec.pages.map(p => (
+                                        <FileTreeItem key={p.name} name={`${p.name.replace(/\s/g, '')}Screen.tsx`} onClick={() => setSelectedFile(`screens/${p.name.replace(/\s/g, '')}Screen.tsx`)} isSelected={selectedFile === `screens/${p.name.replace(/\s/g, '')}Screen.tsx`} />
+                                    ))}
+                                 </FileTreeItem>
+                              </FileTreeItem>
+                           ) : (
+                              <FileTreeItem name="src" isFolder open>
+                                 <FileTreeItem name="layout.tsx" onClick={() => setSelectedFile('layout.tsx')} isSelected={selectedFile === 'layout.tsx'} />
+                              </FileTreeItem>
+                           )}
+                        </div>
+                        <div className="col-span-9 bg-[#0d1117] p-0 overflow-auto">
+                           <SyntaxHighlighter code={generateFileContent(selectedFile || '')} />
+                        </div>
+                     </div>
+                  )}
+                  {activeTab === 'integrations' && (
+                    <div className="p-8 max-w-4xl mx-auto space-y-6">
+                        <h2 className="text-2xl font-bold text-white mb-4">Integrations & Deployment</h2>
                         
-                        {previewMode === 'app' && (
-                           <div className="h-full animate-in fade-in zoom-in duration-300">
-                              <AppInteractivePreview spec={spec} settings={settings} platform={config.platform} />
-                           </div>
-                        )}
-                     </div>
-                  </div>
-                )}
-                {activeTab === 'code' && (
-                  <div className="h-full flex flex-col p-4">
-                     <div className="flex-1 grid grid-cols-12 gap-4 h-full">
-                         {/* File Tree */}
-                         <div className="col-span-3 bg-[#151923] border border-slate-800 rounded-xl p-4 overflow-auto">
-                            <h3 className="text-xs font-bold text-slate-400 uppercase mb-4 px-2">Project Files</h3>
-                            <div className="space-y-1 font-mono text-xs">
-                               <FileTreeItem name="prisma" isFolder open>
-                                 <FileTreeItem name="schema.prisma" onClick={() => setSelectedFile('schema.prisma')} isSelected={selectedFile === 'schema.prisma'} />
-                               </FileTreeItem>
-                               
-                               {/* Dynamic Integration Files */}
-                               {(integrations.supabase || integrations.resend || integrations.twilio) && (
-                                  <FileTreeItem name=".env" onClick={() => setSelectedFile('.env')} isSelected={selectedFile === '.env'} />
-                               )}
-                               
-                               {integrations.supabase && (
-                                  <FileTreeItem name="supabase" isFolder open>
-                                     <FileTreeItem name="migrations" isFolder open>
-                                        <FileTreeItem name="init.sql" onClick={() => setSelectedFile('supabase/migrations/init.sql')} isSelected={selectedFile === 'supabase/migrations/init.sql'} />
-                                     </FileTreeItem>
-                                  </FileTreeItem>
-                               )}
-
-                               {integrations.github && (
-                                  <FileTreeItem name=".github" isFolder open>
-                                     <FileTreeItem name="workflows" isFolder open>
-                                        <FileTreeItem name="deploy.yml" onClick={() => setSelectedFile('.github/workflows/deploy.yml')} isSelected={selectedFile === '.github/workflows/deploy.yml'} />
-                                     </FileTreeItem>
-                                  </FileTreeItem>
-                               )}
-
-                               {config.platform === 'web' ? (
-                                  <FileTreeItem name="src" isFolder open>
-                                    <FileTreeItem name="app" isFolder open>
-                                        <FileTreeItem name="layout.tsx" onClick={() => setSelectedFile('layout.tsx')} isSelected={selectedFile === 'layout.tsx'} />
-                                        {spec.pages?.map((p, i) => (
-                                          <FileTreeItem 
-                                            key={i} 
-                                            name={`${p.name.toLowerCase().replace(/\s/g, '-')}/page.tsx`} 
-                                            onClick={() => setSelectedFile(`${p.name.toLowerCase().replace(/\s/g, '-')}/page.tsx`)}
-                                            isSelected={selectedFile === `${p.name.toLowerCase().replace(/\s/g, '-')}/page.tsx`}
-                                          />
-                                        ))}
-                                    </FileTreeItem>
-                                    <FileTreeItem name="components" isFolder />
-                                  </FileTreeItem>
-                               ) : (
-                                  <FileTreeItem name="src" isFolder open>
-                                    <FileTreeItem name="screens" isFolder open>
-                                      {spec.pages?.map((p, i) => (
-                                          <FileTreeItem 
-                                            key={i} 
-                                            name={`${p.name.replace(/\s/g, '')}Screen.tsx`} 
-                                            onClick={() => setSelectedFile(`screens/${p.name.replace(/\s/g, '')}Screen.tsx`)}
-                                            isSelected={selectedFile === `screens/${p.name.replace(/\s/g, '')}Screen.tsx`}
-                                          />
-                                        ))}
-                                    </FileTreeItem>
-                                    <FileTreeItem name="App.tsx" onClick={() => setSelectedFile('App.tsx')} isSelected={selectedFile === 'App.tsx'} />
-                                  </FileTreeItem>
-                               )}
-                               
-                               <FileTreeItem name="package.json" />
-                               <FileTreeItem name="README.md" />
+                        {/* GitHub Card */}
+                        <div className="bg-[#151923] border border-slate-800 rounded-xl p-6">
+                            <div className="flex items-start justify-between mb-6">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 bg-slate-900 rounded-lg flex items-center justify-center">
+                                        <Github className="w-6 h-6 text-white" />
+                                    </div>
+                                    <div>
+                                        <h3 className="font-bold text-white text-lg">GitHub</h3>
+                                        <p className="text-slate-400 text-sm">Sync your code to a repository.</p>
+                                    </div>
+                                </div>
+                                {integrations.github ? (
+                                    <span className="px-3 py-1 rounded-full bg-green-500/10 text-green-500 text-xs font-medium border border-green-500/20">Connected</span>
+                                ) : (
+                                    <button onClick={() => setIntegrations({...integrations, github: true})} className="px-4 py-2 bg-white text-slate-900 rounded-lg text-sm font-bold hover:bg-slate-200">Connect</button>
+                                )}
                             </div>
-                         </div>
-                         
-                         {/* Code Editor */}
-                         <div className="col-span-9 bg-[#0d1117] border border-slate-800 rounded-xl flex flex-col overflow-hidden">
-                            <div className="bg-[#151923] border-b border-slate-800 px-4 py-2 flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <FileCode className="w-4 h-4 text-blue-400" />
-                                  <span className="text-sm font-medium text-slate-300">{selectedFile}</span>
-                               </div>
-                               <div className="flex items-center gap-3">
-                                  <button onClick={handleCopyCode} className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition bg-slate-800 hover:bg-slate-700 px-2 py-1 rounded">
-                                     <Copy className="w-3 h-3" /> Copy
-                                  </button>
-                                  <div className="text-xs text-slate-500">TypeScript</div>
-                               </div>
-                            </div>
-                            <div className="flex-1 overflow-auto p-0">
-                               <SyntaxHighlighter code={selectedFile ? generateFileContent(selectedFile) : '// Select a file to view source'} />
-                            </div>
-                         </div>
-                     </div>
-                  </div>
-                )}
-                {activeTab === 'integrations' && (
-                  <div className="max-w-4xl mx-auto space-y-6 animate-accordion-down p-8">
-                     <h2 className="text-2xl font-bold text-white mb-6">Integrations</h2>
-                     
-                     {/* GitHub Integration */}
-                     <div className="bg-[#151923] border border-slate-800 rounded-xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 hover:border-slate-600 transition">
-                       <div className="flex gap-4">
-                          <div className="w-12 h-12 bg-slate-900 rounded-xl flex items-center justify-center border border-slate-800">
-                             <Github className="w-6 h-6 text-white" />
-                          </div>
-                          <div>
-                             <h3 className="text-lg font-semibold text-white">GitHub</h3>
-                             <p className="text-sm text-slate-500">Push your code to a new repository and set up CI/CD.</p>
-                             {integrations.github && <div className="mt-2 text-xs text-green-400 flex items-center gap-1"><Check className="w-3 h-3" /> Linked to {repoUrl.replace("https://github.com/", "")}</div>}
-                          </div>
-                       </div>
-                       <button 
-                          onClick={() => !integrations.github && handleConnectIntegration('github')}
-                          disabled={integrations.github}
-                          className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition ${integrations.github ? 'bg-green-500/10 text-green-500 cursor-default' : 'bg-slate-800 text-white hover:bg-slate-700'}`}
-                       >
-                          {integrations.github ? <><Check className="w-4 h-4" /> Synced</> : <><Github className="w-4 h-4" /> Connect & Push</>}
-                       </button>
-                     </div>
+                            
+                            {integrations.github && (
+                                <div className="space-y-4 border-t border-slate-800 pt-6 animate-accordion-down">
+                                     {!repoUrl ? (
+                                         <>
+                                            <div className="flex gap-4 mb-2">
+                                                <button 
+                                                    onClick={() => setGitMode('new')} 
+                                                    className={`flex-1 py-2 text-sm font-medium rounded-lg border ${gitMode === 'new' ? 'bg-slate-800 border-blue-500 text-blue-400' : 'bg-transparent border-slate-700 text-slate-400 hover:border-slate-600'}`}
+                                                >
+                                                    Create New Repo
+                                                </button>
+                                                <button 
+                                                    onClick={() => setGitMode('existing')} 
+                                                    className={`flex-1 py-2 text-sm font-medium rounded-lg border ${gitMode === 'existing' ? 'bg-slate-800 border-blue-500 text-blue-400' : 'bg-transparent border-slate-700 text-slate-400 hover:border-slate-600'}`}
+                                                >
+                                                    Push to Existing
+                                                </button>
+                                            </div>
 
-                     {/* Supabase Integration */}
-                     <div className="bg-[#151923] border border-slate-800 rounded-xl p-6 flex flex-col gap-4 hover:border-slate-600 transition">
-                       <div className="flex justify-between items-start">
-                          <div className="flex gap-4">
-                             <div className="w-12 h-12 bg-slate-900 rounded-xl flex items-center justify-center border border-slate-800">
-                                <Database className="w-6 h-6 text-green-400" />
-                             </div>
-                             <div>
-                                <h3 className="text-lg font-semibold text-white">Supabase</h3>
-                                <p className="text-sm text-slate-500">Connect to your Supabase project to deploy the database schema.</p>
-                             </div>
-                          </div>
-                          {integrations.supabase ? <div className="text-green-500"><CheckCircle className="w-5 h-5" /></div> : null}
-                       </div>
-                       
-                       {!integrations.supabase ? (
-                          <div className="grid grid-cols-2 gap-4">
-                             <div>
-                                <label className="text-xs text-slate-500 mb-1 block">Project URL</label>
-                                <input 
-                                   type="text" 
-                                   placeholder="https://xyz.supabase.co" 
-                                   className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-xs text-white outline-none focus:border-green-500 transition placeholder-slate-600"
-                                   value={supabaseInputs.url}
-                                   onChange={(e) => setSupabaseInputs({...supabaseInputs, url: e.target.value})}
-                                />
-                             </div>
-                             <div>
-                                <label className="text-xs text-slate-500 mb-1 block">Anon Key</label>
-                                <input 
-                                   type="password" 
-                                   placeholder="eyJhbG..." 
-                                   className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-xs text-white outline-none focus:border-green-500 transition placeholder-slate-600"
-                                   value={supabaseInputs.key}
-                                   onChange={(e) => setSupabaseInputs({...supabaseInputs, key: e.target.value})}
-                                />
-                             </div>
-                          </div>
-                       ) : (
-                          <div className="mt-2 p-2 bg-slate-900 rounded border border-slate-800 text-xs font-mono text-slate-400">
-                             <div>URL: {supabaseConfig.url}</div>
-                             <div className="text-green-400 mt-1 flex items-center gap-1"><Check className="w-3 h-3" /> Database Schema Deployed</div>
-                          </div>
-                       )}
-
-                       <button 
-                          onClick={() => !integrations.supabase && handleConnectIntegration('supabase')}
-                          disabled={integrations.supabase}
-                          className={`w-full py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition ${integrations.supabase ? 'bg-green-500/10 text-green-500 cursor-default' : 'bg-green-600 text-white hover:bg-green-700'}`}
-                       >
-                          {integrations.supabase ? <><Check className="w-4 h-4" /> Connected & Deployed</> : <><Cloud className="w-4 h-4" /> Connect Supabase</>}
-                       </button>
-                     </div>
-
-                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        {/* Resend Integration */}
-                        <div className="bg-[#151923] border border-slate-800 rounded-xl p-6 flex flex-col gap-4 hover:border-slate-600 transition">
-                           <div className="flex justify-between items-start">
-                              <div className="flex gap-4">
-                                 <div className="w-10 h-10 bg-slate-900 rounded-lg flex items-center justify-center border border-slate-800">
-                                    <Mail className="w-5 h-5 text-white" />
-                                 </div>
-                                 <div>
-                                    <h3 className="font-semibold text-white">Resend</h3>
-                                    <p className="text-xs text-slate-500">Transactional Email API</p>
-                                 </div>
-                              </div>
-                              {integrations.resend ? <div className="text-green-500"><CheckCircle className="w-5 h-5" /></div> : null}
-                           </div>
-                           {!integrations.resend ? (
-                              <input 
-                                 type="text" 
-                                 placeholder="Paste re_123..." 
-                                 className="bg-slate-900 border border-slate-700 rounded px-3 py-2 text-xs text-white outline-none focus:border-white transition placeholder-slate-600"
-                                 value={apiKeys.resend}
-                                 onChange={(e) => setApiKeys({...apiKeys, resend: e.target.value})}
-                              />
-                           ) : (
-                              <div className="text-xs text-slate-500 font-mono bg-slate-900 p-2 rounded border border-slate-800">Key: {apiKeys.resend.substring(0,6)}...</div>
-                           )}
-                           <button 
-                              onClick={() => !integrations.resend && handleConnectIntegration('resend')}
-                              disabled={integrations.resend}
-                              className={`w-full py-2 rounded-lg text-xs font-medium border ${integrations.resend ? 'border-green-500/20 text-green-500 bg-green-500/5' : 'border-slate-700 text-slate-400 hover:text-white hover:border-slate-600'}`}
-                           >
-                              {integrations.resend ? 'Configured' : 'Connect Resend'}
-                           </button>
+                                            <div>
+                                                <label className="block text-xs font-medium text-slate-400 mb-1.5">Personal Access Token</label>
+                                                <input type="password" placeholder="ghp_..." className="w-full bg-[#0B0D12] border border-slate-700 rounded-lg px-4 py-2.5 text-white text-sm outline-none focus:border-blue-500" />
+                                            </div>
+                                            
+                                            {gitMode === 'new' ? (
+                                                <div>
+                                                    <label className="block text-xs font-medium text-slate-400 mb-1.5">Repository Name</label>
+                                                    <input type="text" placeholder="my-awesome-app" className="w-full bg-[#0B0D12] border border-slate-700 rounded-lg px-4 py-2.5 text-white text-sm outline-none focus:border-blue-500" />
+                                                </div>
+                                            ) : (
+                                                <div>
+                                                    <label className="block text-xs font-medium text-slate-400 mb-1.5">Remote URL</label>
+                                                    <input type="text" placeholder="https://github.com/username/repo.git" className="w-full bg-[#0B0D12] border border-slate-700 rounded-lg px-4 py-2.5 text-white text-sm outline-none focus:border-blue-500" />
+                                                </div>
+                                            )}
+                                            
+                                            <button onClick={handlePushToGithub} className="bg-[#238636] hover:bg-[#2ea043] text-white px-4 py-2 rounded-lg font-medium text-sm flex items-center gap-2">
+                                                <Github className="w-4 h-4" /> {gitMode === 'new' ? 'Create & Push' : 'Push Code'}
+                                            </button>
+                                         </>
+                                     ) : (
+                                         <div className="bg-slate-900/50 rounded-lg p-4 border border-slate-800 flex items-center justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <CheckCircle className="w-5 h-5 text-green-500" />
+                                                <div>
+                                                    <div className="text-sm text-white font-medium">Successfully pushed to main</div>
+                                                    <a href="#" className="text-xs text-blue-400 hover:underline">{repoUrl}</a>
+                                                </div>
+                                            </div>
+                                            <button onClick={() => setRepoUrl("")} className="text-xs text-slate-500 hover:text-white">Disconnect</button>
+                                         </div>
+                                     )}
+                                </div>
+                            )}
                         </div>
-
-                        {/* Twilio Integration */}
-                        <div className="bg-[#151923] border border-slate-800 rounded-xl p-6 flex flex-col gap-4 hover:border-slate-600 transition">
-                           <div className="flex justify-between items-start">
-                              <div className="flex gap-4">
-                                 <div className="w-10 h-10 bg-slate-900 rounded-lg flex items-center justify-center border border-slate-800">
-                                    <Smartphone className="w-5 h-5 text-red-500" />
-                                 </div>
-                                 <div>
-                                    <h3 className="font-semibold text-white">Twilio</h3>
-                                    <p className="text-xs text-slate-500">SMS & Messaging</p>
-                                 </div>
-                              </div>
-                              {integrations.twilio ? <div className="text-green-500"><CheckCircle className="w-5 h-5" /></div> : null}
-                           </div>
-                           {!integrations.twilio ? (
-                              <input 
-                                 type="text" 
-                                 placeholder="Paste Account SID..." 
-                                 className="bg-slate-900 border border-slate-700 rounded px-3 py-2 text-xs text-white outline-none focus:border-white transition placeholder-slate-600"
-                                 value={apiKeys.twilio}
-                                 onChange={(e) => setApiKeys({...apiKeys, twilio: e.target.value})}
-                              />
-                           ) : (
-                              <div className="text-xs text-slate-500 font-mono bg-slate-900 p-2 rounded border border-slate-800">SID: {apiKeys.twilio.substring(0,6)}...</div>
-                           )}
-                           <button 
-                              onClick={() => !integrations.twilio && handleConnectIntegration('twilio')}
-                              disabled={integrations.twilio}
-                              className={`w-full py-2 rounded-lg text-xs font-medium border ${integrations.twilio ? 'border-green-500/20 text-green-500 bg-green-500/5' : 'border-slate-700 text-slate-400 hover:text-white hover:border-slate-600'}`}
-                           >
-                              {integrations.twilio ? 'Configured' : 'Connect Twilio'}
-                           </button>
-                        </div>
-                     </div>
-                  </div>
-                )}
-             </>
-           ) : null}
-        </div>
+                    </div>
+                  )}
+               </>
+            ) : null}
+         </div>
       </div>
     </div>
   );
 };
 
-const LandingView = ({ onStartBuilder, onViewChange, settings, onUpdateSettings }: { onStartBuilder: (cfg: BuilderConfig) => void, onViewChange: (v: string) => void, settings: AppSettings, onUpdateSettings: (s: AppSettings) => void }) => {
-  const [prompt, setPrompt] = useState("");
+// --- APP ROOT ---
+
+const LandingView = ({ onStart, onUpdateSettings }: { onStart: (c: BuilderConfig) => void, onUpdateSettings: (name: string) => void }) => {
+  const [prompt, setPrompt] = useState('');
   const [platform, setPlatform] = useState<'web' | 'mobile'>('web');
   const [framework, setFramework] = useState('Next.js');
 
-  const webFrameworks = ['Next.js', 'React', 'Vue', 'Remix', 'Svelte'];
-  const mobileFrameworks = ['React Native', 'Expo', 'Flutter', 'SwiftUI'];
-  
-  const currentFrameworks = platform === 'web' ? webFrameworks : mobileFrameworks;
-
-  // Reset framework when platform changes
   useEffect(() => {
-     setFramework(currentFrameworks[0]);
+    setFramework(platform === 'web' ? 'Next.js' : 'React Native');
   }, [platform]);
 
-  const handleStartBuilder = () => {
-    if (!prompt.trim()) return;
-    onStartBuilder({ prompt, platform, framework });
-  };
-
   return (
-    <div className="min-h-screen bg-slate-950 relative overflow-hidden flex flex-col">
-      <Header onViewChange={onViewChange} currentView="home" settings={settings} />
-      <div className="flex-1 flex flex-col items-center justify-center px-4 relative z-10 py-20">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[600px] rounded-full blur-[120px] -z-10 opacity-30 pointer-events-none" style={{ backgroundColor: settings.primaryColor }}></div>
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900/50 border border-slate-800 text-slate-400 text-xs mb-8">
-          <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-          v2.5 Release: Now with Gemini Flash Support
-        </div>
-        <h1 className="text-5xl md:text-7xl font-bold text-center bg-clip-text text-transparent bg-gradient-to-b from-white to-slate-400 mb-6 tracking-tight">
-          Ship your startup <br/> in <span style={{ color: settings.primaryColor }}>one prompt</span>.
-        </h1>
-        <p className="text-slate-400 text-lg md:text-xl text-center max-w-2xl mb-10">
-          Describe your idea. {settings.appName} generates the backend, frontend, database schema, and deployment pipeline instantly.
-        </p>
-        
-        <div className="w-full max-w-2xl space-y-4">
-           {/* Controls */}
-           <div className="flex items-center justify-center gap-4">
-              <div className="bg-slate-900 border border-slate-800 rounded-lg p-1 flex">
-                 <button 
-                    onClick={() => setPlatform('web')}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition ${platform === 'web' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
-                 >
-                    <Laptop className="w-4 h-4" /> Web App
-                 </button>
-                 <button 
-                    onClick={() => setPlatform('mobile')}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition ${platform === 'mobile' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
-                 >
-                    <Tablet className="w-4 h-4" /> Mobile App
-                 </button>
-              </div>
-              
-              <div className="bg-slate-900 border border-slate-800 rounded-lg px-4 py-2 flex items-center gap-3">
-                 <span className="text-xs text-slate-500 font-medium uppercase tracking-wider">Framework</span>
-                 <select 
-                    value={framework}
-                    onChange={(e) => setFramework(e.target.value)}
-                    className="bg-transparent text-white text-sm font-medium outline-none cursor-pointer"
-                 >
-                    {currentFrameworks.map(fw => (
-                       <option key={fw} value={fw} className="bg-slate-900">{fw}</option>
-                    ))}
-                 </select>
-              </div>
+    <div className="min-h-screen bg-slate-950 flex flex-col relative overflow-hidden">
+       {/* Ambient Background */}
+       <div className="absolute top-0 left-0 w-full h-full bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 pointer-events-none"></div>
+       <div className="absolute -top-40 -right-40 w-[600px] h-[600px] bg-purple-600/20 rounded-full blur-[120px]"></div>
+       <div className="absolute -bottom-40 -left-40 w-[600px] h-[600px] bg-blue-600/20 rounded-full blur-[120px]"></div>
 
-               <div className="bg-slate-900 border border-slate-800 rounded-lg px-4 py-2 flex items-center gap-3">
-                   <span className="text-xs text-slate-500 font-medium uppercase tracking-wider">Project Name</span>
-                   <input 
-                      type="text" 
-                      value={settings.appName}
-                      onChange={(e) => onUpdateSettings({...settings, appName: e.target.value})}
-                      className="bg-transparent text-white text-sm font-medium outline-none w-32 focus:w-48 transition-all"
-                      placeholder="My App"
-                   />
+       <div className="relative z-10 container mx-auto px-6 py-24 flex flex-col items-center justify-center flex-1 text-center">
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-slate-900/50 border border-slate-800 mb-8 backdrop-blur animate-fade-in-up">
+             <Rocket className="w-4 h-4 text-purple-400" />
+             <span className="text-sm text-slate-300 font-medium">Build apps at the speed of thought</span>
+          </div>
+          
+          <h1 className="text-6xl md:text-7xl font-extrabold text-white tracking-tight mb-6 max-w-4xl leading-tight">
+             Idea to Production <br/>
+             <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-blue-500">in One Prompt.</span>
+          </h1>
+          
+          <p className="text-xl text-slate-400 max-w-2xl mb-12 leading-relaxed">
+             Generate full-stack web and mobile applications with a single sentence. 
+             Backend, Database, UI, and Deployment included.
+          </p>
+
+          <div className="w-full max-w-2xl bg-slate-900/60 backdrop-blur-xl border border-slate-700/50 p-2 rounded-2xl shadow-2xl transition-all hover:border-slate-600/80 group">
+             <div className="relative flex items-center">
+                <div className="absolute left-4 text-slate-500"><Terminal className="w-5 h-5" /></div>
+                <input 
+                  type="text" 
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  placeholder="Describe your app... (e.g. A marketplace for vintage watches)"
+                  className="w-full bg-transparent border-none text-white text-lg py-4 pl-12 pr-4 focus:ring-0 placeholder:text-slate-600 outline-none h-16"
+                  onKeyDown={(e) => { if (e.key === 'Enter' && prompt) onStart({ prompt, platform, framework }); }}
+                />
+                <button 
+                  onClick={() => prompt && onStart({ prompt, platform, framework })}
+                  className="absolute right-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:opacity-90 text-white px-6 py-2.5 rounded-xl font-bold transition shadow-lg shadow-purple-900/20 flex items-center gap-2"
+                >
+                   Build <ChevronRight className="w-4 h-4" />
+                </button>
+             </div>
+             
+             <div className="border-t border-slate-800 mt-2 pt-3 px-4 pb-1 flex items-center gap-6 text-sm">
+                <div className="flex items-center gap-2">
+                   <span className="text-slate-500">Platform:</span>
+                   <div className="flex bg-slate-800 rounded-lg p-1">
+                      <button onClick={() => setPlatform('web')} className={`px-3 py-1 rounded-md transition ${platform === 'web' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}>Web</button>
+                      <button onClick={() => setPlatform('mobile')} className={`px-3 py-1 rounded-md transition ${platform === 'mobile' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}>Mobile</button>
+                   </div>
                 </div>
-           </div>
-
-           {/* Input */}
-           <div className="relative group">
-              <div className="absolute -inset-1 rounded-2xl blur opacity-25 group-hover:opacity-50 transition duration-1000" style={{ background: `linear-gradient(to right, ${settings.primaryColor}, #4f46e5)` }}></div>
-              <div className="relative bg-slate-900 rounded-xl p-2 flex items-center shadow-2xl border border-slate-800">
-              <div className="p-3 text-slate-400"><Zap className="w-5 h-5" /></div>
-              <input 
-                 type="text" 
-                 placeholder={`Describe your ${platform} app...`} 
-                 className="flex-1 bg-transparent border-none outline-none text-white placeholder-slate-500 text-lg"
-                 value={prompt}
-                 onChange={(e) => setPrompt(e.target.value)}
-                 onKeyDown={(e) => e.key === 'Enter' && handleStartBuilder()}
-              />
-              <button onClick={handleStartBuilder} className="bg-white text-black hover:bg-slate-200 px-6 py-3 rounded-lg font-semibold transition flex items-center gap-2">
-                 Generate <ChevronRight className="w-4 h-4" />
-              </button>
-              </div>
-           </div>
-        </div>
-      </div>
+                <div className="flex items-center gap-2">
+                   <span className="text-slate-500">Stack:</span>
+                   <select value={framework} onChange={(e) => setFramework(e.target.value)} className="bg-slate-800 text-slate-300 border-none rounded-md py-1 px-3 outline-none cursor-pointer">
+                      {platform === 'web' ? (
+                          <>
+                             <option>Next.js</option>
+                             <option>Remix</option>
+                             <option>Vue/Nuxt</option>
+                          </>
+                      ) : (
+                          <>
+                             <option>React Native</option>
+                             <option>Flutter</option>
+                             <option>SwiftUI</option>
+                          </>
+                      )}
+                   </select>
+                </div>
+             </div>
+          </div>
+          
+          <div className="mt-12 flex gap-8 text-sm font-medium text-slate-500">
+             <div className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-green-500" /> Free Tier Available</div>
+             <div className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-green-500" /> No Credit Card Required</div>
+             <div className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-green-500" /> 10x Faster Dev</div>
+          </div>
+       </div>
     </div>
   );
 };
 
-// --- MAIN APP ---
-
 const App = () => {
-  const [currentView, setCurrentView] = useState('home');
+  const [view, setView] = useState('landing');
+  const [user, setUser] = useState<User | null>(null);
   const [builderConfig, setBuilderConfig] = useState<BuilderConfig>({ prompt: '', platform: 'web', framework: 'Next.js' });
-  const [appSettings, setAppSettings] = useState<AppSettings>({ appName: "HelloJadanAI", primaryColor: "#7c3aed" });
-  
-  // Lifted Provider State to manage API Keys globally
-  const [providers, setProviders] = useState(INITIAL_PROVIDERS);
+  const [settings, setSettings] = useState<AppSettings>({ appName: 'HelloJadanAI', primaryColor: '#7c3aed' });
+  const [providers, setProviders] = useState<ProviderConfig[]>(INITIAL_PROVIDERS);
+
+  // Get active Gemini key from providers or fallback
+  const geminiKey = providers.find(p => p.id === 'p1')?.apiKey || '';
 
   const handleStartBuilder = (config: BuilderConfig) => {
-    setBuilderConfig(config);
-    setCurrentView('builder');
-  };
-  
-  // Extract Gemini API Key (if set by user in Admin Panel)
-  const geminiKey = providers.find(p => p.id === 'p1')?.apiKey;
-
-  const renderContent = () => {
-    switch(currentView) {
-      case 'home':
-        return <LandingView onStartBuilder={handleStartBuilder} onViewChange={setCurrentView} settings={appSettings} onUpdateSettings={setAppSettings} />;
-      case 'builder':
-        return <BuilderChatInterface config={builderConfig} onViewChange={setCurrentView} settings={appSettings} apiKey={geminiKey} />;
-      case 'admin-dash':
-      case 'admin-users':
-      case 'admin-tasks':
-      case 'admin-ai':
-      case 'admin-settings':
-        return (
-          <div className="min-h-screen bg-slate-950 flex">
-            <AdminSidebar currentView={currentView} onViewChange={setCurrentView} settings={appSettings} />
-            <div className="flex-1 overflow-auto bg-slate-950">
-               {currentView === 'admin-dash' && <AdminDashboard />}
-               {currentView === 'admin-users' && <AdminUsers />}
-               {currentView === 'admin-tasks' && <AdminTasks />}
-               {currentView === 'admin-ai' && <AdminProviders providers={providers} onUpdate={setProviders} />}
-               {currentView === 'admin-settings' && <AdminSettingsView settings={appSettings} onUpdate={setAppSettings} />}
-            </div>
-          </div>
-        );
-      default:
-        return <LandingView onStartBuilder={handleStartBuilder} onViewChange={setCurrentView} settings={appSettings} onUpdateSettings={setAppSettings} />;
+    if (!user) {
+        setBuilderConfig(config);
+        setView('auth');
+    } else {
+        setBuilderConfig(config);
+        setView('builder');
     }
   };
 
-  return <>{renderContent()}</>;
+  const handleLogin = () => {
+    setUser(MOCK_USERS[1]); // Login as Alice by default
+    if (builderConfig.prompt) {
+        setView('builder');
+    } else {
+        setView('home');
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-purple-500/30">
+      {view === 'landing' && <LandingView onStart={handleStartBuilder} onUpdateSettings={(name) => setSettings({...settings, appName: name})} />}
+      
+      {view === 'auth' && <AuthView onLogin={handleLogin} />}
+
+      {view === 'builder' && (
+         <BuilderChatInterface 
+            config={builderConfig} 
+            onViewChange={setView} 
+            settings={settings} 
+            apiKey={geminiKey}
+         />
+      )}
+
+      {(view === 'home' || view === 'templates' || view === 'docs') && (
+         <>
+           <Header onViewChange={setView} currentView={view} settings={settings} user={user} onLogout={() => setUser(null)} />
+           {view === 'docs' ? <DocsView settings={settings} /> : (
+               <div className="container mx-auto px-6 py-12 text-center">
+                  <h1 className="text-4xl font-bold text-white mb-4">Dashboard</h1>
+                  <p className="text-slate-400 mb-8">Welcome back, {user?.name}. Start a new project or manage existing ones.</p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto">
+                      <div onClick={() => setView('landing')} className="bg-slate-900 border border-slate-800 p-8 rounded-2xl hover:border-purple-500/50 cursor-pointer transition group">
+                          <div className="w-12 h-12 bg-purple-500/10 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition"><Rocket className="w-6 h-6 text-purple-500" /></div>
+                          <h3 className="text-xl font-bold text-white mb-2">New Project</h3>
+                          <p className="text-sm text-slate-400">Launch a new app from a text prompt.</p>
+                      </div>
+                      <div className="bg-slate-900 border border-slate-800 p-8 rounded-2xl hover:border-blue-500/50 cursor-pointer transition group">
+                          <div className="w-12 h-12 bg-blue-500/10 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition"><Layout className="w-6 h-6 text-blue-500" /></div>
+                          <h3 className="text-xl font-bold text-white mb-2">Templates</h3>
+                          <p className="text-sm text-slate-400">Start from a pre-built template.</p>
+                      </div>
+                      <div className="bg-slate-900 border border-slate-800 p-8 rounded-2xl hover:border-green-500/50 cursor-pointer transition group">
+                          <div className="w-12 h-12 bg-green-500/10 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition"><Globe className="w-6 h-6 text-green-500" /></div>
+                          <h3 className="text-xl font-bold text-white mb-2">Deployments</h3>
+                          <p className="text-sm text-slate-400">Manage your active applications.</p>
+                      </div>
+                  </div>
+               </div>
+           )}
+         </>
+      )}
+
+      {view.startsWith('admin') && (
+        <div className="flex min-h-screen">
+          <AdminSidebar currentView={view} onViewChange={setView} settings={settings} />
+          <div className="flex-1 bg-slate-950 overflow-y-auto">
+             {view === 'admin-dash' && <AdminDashboard />}
+             {view === 'admin-users' && <AdminUsers />}
+             {view === 'admin-tasks' && <AdminTasks />}
+             {view === 'admin-ai' && <AdminProviders providers={providers} onUpdate={setProviders} />}
+             {view === 'admin-settings' && <AdminSettingsView settings={settings} onUpdate={setSettings} />}
+             {view === 'admin-billing' && <div className="p-8 text-slate-400">Billing module coming soon...</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 };
 
 const rootElement = document.getElementById('root');
-if (rootElement) {
-  createRoot(rootElement).render(<App />);
+if (!rootElement) {
+  throw new Error("Could not find root element to mount to");
 }
+
+const root = createRoot(rootElement);
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
